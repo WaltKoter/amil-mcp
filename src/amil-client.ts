@@ -63,6 +63,7 @@ export const LINHAS = {
   PME: [
     { id: "Linha Amil", label: "Linha Amil (PME)" },
     { id: "Linha Amil Black", label: "Linha Amil Black (PME)" },
+    { id: "Linha Selecionada", label: "Linha Selecionada (PME)" },
   ],
   PJ: [
     { id: "Linha Amil PJ", label: "Linha Amil (PJ)" },
@@ -112,14 +113,21 @@ export const COMPULSORIEDADE_PJ = [
 
 export const COPARTICIPACAO_PME_AMIL = [
   { value: "Com coparticipação30", label: "Com Coparticipação 30%" },
-  { value: "Com coparticipação40", label: "Com Coparticipação 40%" },
   { value: "Com coparticipação parcial", label: "Com Coparticipação Parcial TP" },
 ];
 
 export const COPARTICIPACAO_PME_BLACK = [
   { value: "Com coparticipação30", label: "Com Coparticipação 30%" },
   { value: "Com coparticipação parcial", label: "Com Coparticipação Parcial TP" },
-  { value: "Referência", label: "Plano Referência" },
+];
+
+export const COPARTICIPACAO_PME_SELECIONADA = [
+  { value: "Com coparticipação30", label: "Com Coparticipação 30%" },
+  { value: "Com coparticipação parcial", label: "Com Coparticipação Parcial TP" },
+];
+
+export const COMPULSORIEDADE_PME_BLACK = [
+  { value: "Demais empresas", label: "Demais empresas" },
 ];
 
 export const COPARTICIPACAO_PJ = [
@@ -263,20 +271,29 @@ export async function getProviders(params: NetworkParams): Promise<Record<string
 export function getFormOptions(linha: string) {
   const isPJ = linha.includes("PJ");
   const isBlack = linha.includes("Black");
+  const isSelecionada = linha.includes("Selecionada");
 
   let coparticipacaoOptions;
+  let compulsoriedadeOptions;
+
   if (isPJ) {
     coparticipacaoOptions = COPARTICIPACAO_PJ;
+    compulsoriedadeOptions = COMPULSORIEDADE_PJ;
   } else if (isBlack) {
     coparticipacaoOptions = COPARTICIPACAO_PME_BLACK;
+    compulsoriedadeOptions = COMPULSORIEDADE_PME_BLACK;
+  } else if (isSelecionada) {
+    coparticipacaoOptions = COPARTICIPACAO_PME_SELECIONADA;
+    compulsoriedadeOptions = COMPULSORIEDADE_PME;
   } else {
     coparticipacaoOptions = COPARTICIPACAO_PME_AMIL;
+    compulsoriedadeOptions = COMPULSORIEDADE_PME;
   }
 
   return {
     estados: isPJ ? ESTADOS_PJ : ESTADOS_PME,
     numero_vidas: isPJ ? NUMERO_VIDAS_PJ : NUMERO_VIDAS_PME,
-    compulsoriedade: isPJ ? COMPULSORIEDADE_PJ : COMPULSORIEDADE_PME,
+    compulsoriedade: compulsoriedadeOptions,
     coparticipacao: coparticipacaoOptions,
     regioes: REGIOES,
     modalidades: MODALIDADES,
