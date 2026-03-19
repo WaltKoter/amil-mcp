@@ -91,6 +91,14 @@ async function main() {
   });
 
   // ─── MCP Endpoint ─────────────────────────────────────────────────────────
+  // Inject Accept header if missing (some clients like Manus don't send it)
+  app.all("/mcp", (req, _res, next) => {
+    if (!req.headers.accept || !req.headers.accept.includes("text/event-stream")) {
+      req.headers.accept = "application/json, text/event-stream";
+    }
+    next();
+  });
+
   app.all("/mcp", async (req, res) => {
     const server = new McpServer({
       name: "amil-consulta",
