@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -90,7 +91,9 @@ async function main() {
     }
   });
 
-  // ─── MCP Endpoint ─────────────────────────────────────────────────────────
+  // ─── MCP Endpoint (session-aware) ─────────────────────────────────────────
+  const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
+
   // Inject Accept header if missing (some clients like Manus don't send it)
   app.all("/mcp", (req, _res, next) => {
     if (!req.headers.accept || !req.headers.accept.includes("text/event-stream")) {
@@ -100,6 +103,16 @@ async function main() {
   });
 
   app.all("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+    // If client sends a session ID, reuse that session
+    if (sessionId && sessions.has(sessionId)) {
+      const session = sessions.get(sessionId)!;
+      await session.transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    // New session
     const server = new McpServer({
       name: "amil-consulta",
       version: "1.0.0",
@@ -107,15 +120,31 @@ async function main() {
     registerTools(server);
 
     const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
+      sessionIdGenerator: () => crypto.randomUUID(),
     });
 
     res.on("close", () => {
-      transport.close();
-      server.close();
+      const sid = transport.sessionId;
+      if (sid && sessions.has(sid)) {
+        // Keep session alive for a while for multi-request clients
+        setTimeout(() => {
+          const s = sessions.get(sid);
+          if (s) {
+            s.transport.close();
+            s.server.close();
+            sessions.delete(sid);
+          }
+        }, 5 * 60 * 1000); // 5 min TTL
+      }
     });
 
     await server.connect(transport);
+
+    // Store session after connect so sessionId is available
+    if (transport.sessionId) {
+      sessions.set(transport.sessionId, { server, transport });
+    }
+
     await transport.handleRequest(req, res, req.body);
   });
 
