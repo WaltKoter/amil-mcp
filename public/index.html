@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amil - Consulta de Planos</title>
+  <style>
+    :root {
+      --primary: #0f0d59;
+      --primary-light: #2a27a0;
+      --accent: #e91e8c;
+      --accent-hover: #d4177e;
+      --bg: #f5f5f7;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-light: #6b6b80;
+      --border: #e0e0e8;
+      --radius: 10px;
+      --shadow: 0 2px 12px rgba(15,13,89,0.08);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--primary);
+      color: white;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    header h1 { font-size: 22px; font-weight: 600; }
+    header span { font-size: 13px; opacity: 0.7; }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      background: var(--card);
+      border-bottom: 2px solid var(--border);
+      padding: 0 32px;
+    }
+
+    .tab {
+      padding: 14px 24px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      border-bottom: 3px solid transparent;
+      color: var(--text-light);
+      transition: all 0.2s;
+    }
+
+    .tab:hover { color: var(--primary); }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .form-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+
+    .form-card h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--primary);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--text-light);
+      letter-spacing: 0.5px;
+    }
+
+    select, input[type="text"] {
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      background: white;
+      color: var(--text);
+      transition: border-color 0.2s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b6b80' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .radio-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .radio-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .radio-pill:has(input:checked) {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .radio-pill input { display: none; }
+
+    .btn {
+      padding: 12px 32px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 8px;
+    }
+
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled {
+      background: var(--border);
+      cursor: not-allowed;
+    }
+
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 40px;
+      color: var(--text-light);
+    }
+
+    .loading.active { display: block; }
+
+    .loading .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+
+    .results-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .results-header {
+      padding: 16px 24px;
+      background: var(--primary);
+      color: white;
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .results-header .badge {
+      background: var(--accent);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead th {
+      background: #f8f8fc;
+      padding: 10px 12px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-light);
+      border-bottom: 2px solid var(--border);
+      position: sticky;
+      top: 0;
+    }
+
+    tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr:hover { background: #f8f8fc; }
+
+    .price { font-weight: 600; color: var(--primary); font-variant-numeric: tabular-nums; }
+
+    .category-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .cat-bronze { background: #f0e0c8; color: #8b6914; }
+    .cat-prata { background: #e8e8f0; color: #555; }
+    .cat-ouro { background: #fff3d0; color: #9a7b00; }
+    .cat-platinum { background: #e0e8f8; color: #2a4a8a; }
+    .cat-one_black, .cat-black { background: #2a2a2a; color: #fff; }
+
+    .table-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+
+    .network-category {
+      margin-bottom: 24px;
+    }
+
+    .network-category h3 {
+      padding: 12px 20px;
+      background: var(--primary);
+      color: white;
+      font-size: 14px;
+      border-radius: var(--radius) var(--radius) 0 0;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px;
+      color: var(--text-light);
+    }
+
+    .empty-state svg { width: 64px; height: 64px; opacity: 0.3; margin-bottom: 12px; }
+
+    .filter-input {
+      padding: 8px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      width: 250px;
+      background-image: none;
+      padding-right: 12px;
+    }
+
+    .btn-export {
+      padding: 10px 20px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-export:hover { background: var(--primary-light); }
+
+    .export-bar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px 24px;
+      background: #f8f8fc;
+      border-top: 1px solid var(--border);
+    }
+
+    @media (max-width: 768px) {
+      .container { padding: 16px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .tabs { padding: 0 16px; }
+      .tab { padding: 12px 16px; font-size: 13px; }
+      header { padding: 16px; }
+      .filter-input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Amil - Consulta de Planos</h1>
+      <span>Tabelas de Precos &amp; Rede de Prestadores</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="prices">Tabela de Precos</div>
+    <div class="tab" data-panel="network">Rede de Prestadores</div>
+  </div>
+
+  <div class="container">
+    <!-- ─── PRICE TABLE PANEL ─────────────────────────────────────────── -->
+    <div class="panel active" id="panel-prices">
+      <div class="form-card">
+        <h2>Formulario da Cotacao</h2>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Linha de Produtos</label>
+            <select id="price-linha"></select>
+          </div>
+          <div class="form-group">
+            <label>Estado</label>
+            <select id="price-estado"></select>
+          </div>
+          <div class="form-group">
+            <label>Numero de Vidas</label>
+            <select id="price-vidas"></select>
+          </div>
+          <div class="form-group">
+            <label>Compulsoriedade</label>
+            <select id="price-compulsorio"></select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:16px">
+          <label>Coparticipacao</label>
+          <div class="radio-group" id="price-copart"></div>
+        </div>
+        <button class="btn" id="btn-search-prices">Buscar Precos</button>
+      </div>
+
+      <div class="loading" id="price-loading">
+        <div class="spinner"></div>
+        <div>Buscando tabela de precos...</div>
+      </div>
+
+      <div id="price-results"></div>
+    </div>
+
+    <!-- ─── NETWORK PANEL ─────────────────────────────────────────────── -->
+    <div class="panel" id="panel-network">
+      <div class="form-card">
+        <h2>Buscar Rede de Prestadores</h2>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Linha de Produtos</label>
+            <select id="net-linha"></select>
+          </div>
+          <div class="form-group">
+            <label>Regiao</label>
+            <select id="net-regiao">
+              <option value="">Selecione</option>
+              <option value="Norte">Norte</option>
+              <option value="Nordeste">Nordeste</option>
+              <option value="Sul">Sul</option>
+              <option value="Sudeste">Sudeste</option>
+              <option value="Centro-Oeste">Centro-Oeste</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Estado</label>
+            <select id="net-estado">
+              <option value="">Selecione uma regiao</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Tipo de Rede</label>
+            <select id="net-tipo">
+              <option value="Hospitais">Hospitais</option>
+              <option value="Laboratórios">Laboratorios</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn" id="btn-search-network">Buscar Rede</button>
+      </div>
+
+      <div class="loading" id="net-loading">
+        <div class="spinner"></div>
+        <div>Buscando prestadores...</div>
+      </div>
+
+      <div id="net-results"></div>
+    </div>
+  </div>
+
+  <script>
+    // ─── Tab switching ─────────────────────────────────────────────────────
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+      });
+    });
+
+    // ─── API helpers ───────────────────────────────────────────────────────
+    const api = {
+      get: (url) => fetch(url).then(r => r.json()),
+      post: (url, body) => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(r => r.json()),
+    };
+
+    function setOptions(selectId, items, valueFn, labelFn, placeholder) {
+      const sel = document.getElementById(selectId);
+      sel.innerHTML = placeholder ? `<option value="">${placeholder}</option>` : '';
+      items.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = valueFn(item);
+        opt.textContent = labelFn(item);
+        sel.appendChild(opt);
+      });
+    }
+
+    function setRadios(containerId, items, name) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+      items.forEach((item, i) => {
+        const label = document.createElement('label');
+        label.className = 'radio-pill';
+        label.innerHTML = `<input type="radio" name="${name}" value="${item.value}" ${i === 0 ? 'checked' : ''}>${item.label}`;
+        container.appendChild(label);
+      });
+    }
+
+    function getCategoryClass(cat) {
+      const c = (cat || '').toLowerCase();
+      if (c.includes('bronze')) return 'cat-bronze';
+      if (c.includes('prata')) return 'cat-prata';
+      if (c.includes('ouro')) return 'cat-ouro';
+      if (c.includes('platinum')) return 'cat-platinum';
+      if (c.includes('black') || c.includes('one')) return 'cat-one_black';
+      return '';
+    }
+
+    // ─── State for export ─────────────────────────────────────────────────
+    let lastPriceData = null;
+    let lastPriceParams = null;
+    let lastNetworkData = null;
+    let lastNetworkParams = null;
+
+    function parsePrice(str) {
+      if (!str) return 0;
+      return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+
+    function mapCoparticipacao(copart) {
+      if (!copart) return 'WITHOUT';
+      const c = copart.toLowerCase();
+      if (c.includes('sem')) return 'WITHOUT';
+      if (c.includes('parcial')) return 'PARTIAL';
+      if (c.includes('com')) return 'WITH';
+      return 'WITHOUT';
+    }
+
+    function mapAcomodacao(tipo) {
+      if (!tipo) return null;
+      const t = tipo.toUpperCase();
+      if (t === 'QP' || t.includes('APART')) return { id: 'jo6qmnf0p00yrke9yme6wpzq', label: 'Apartamento' };
+      if (t === 'QC' || t.includes('ENFERM')) return { id: 'bxi59gk2riaqa6rb4lk1iofm', label: 'Enfermaria' };
+      return null;
+    }
+
+    function mapContractType(compulsorio) {
+      if (!compulsorio) return 'NOT_APPLICABLE';
+      const c = compulsorio.toLowerCase();
+      if (c.includes('compuls')) return 'COMPULSORY';
+      if (c.includes('livre') || c.includes('adesão')) return 'VOLUNTARY';
+      return 'NOT_APPLICABLE';
+    }
+
+    function buildTableName(params) {
+      // Padrão: Linha (nome) - Qtd de vidas - Tipo empresa - Copart
+      const linhaShort = params.linha.replace('Linha ', '');
+
+      const vidasLabel = {
+        '2': '2 vidas', '3 a 4': '3 a 4 vidas', '5 a 29': '5 a 29 vidas',
+        '30 a 99': '30 a 99 vidas', '100 a 199': '100 a 199 vidas'
+      }[params.numero_vidas] || params.numero_vidas;
+
+      const compLabel = params.compulsoriedade || '';
+
+      const copartMap = {
+        'Com coparticipação30': 'Copart. 30%',
+        'Com coparticipação40': 'Copart. 40%',
+        'Com coparticipação parcial': 'Copart. Parcial TP',
+        'Sem coparticipação': 'Sem Copart.',
+        'Referência': 'Referência'
+      };
+      const copartLabel = copartMap[params.coparticipacao] || params.coparticipacao || '';
+
+      return [linhaShort, vidasLabel, compLabel, copartLabel].filter(Boolean).join(' - ');
+    }
+
+    function buildPriceExportJson(plans, params) {
+      const isPJ = params.linha.includes('PJ');
+      const vidasMap = {
+        '2': [2, 2], '3 a 4': [3, 4], '5 a 29': [5, 29],
+        '30 a 99': [30, 99], '100 a 199': [100, 199]
+      };
+      const [minVidas, maxVidas] = vidasMap[params.numero_vidas] || [2, 29];
+
+      const products = plans.map(p => {
+        const acom = mapAcomodacao(p.tipo_acomodacao);
+        const product = {
+          name: p.nome,
+          ansCode: p.registro_ans,
+          priceAgeGroup018: parsePrice(p.faixa_0_18),
+          priceAgeGroup1923: parsePrice(p.faixa_19_23),
+          priceAgeGroup2428: parsePrice(p.faixa_24_28),
+          priceAgeGroup2933: parsePrice(p.faixa_29_33),
+          priceAgeGroup3438: parsePrice(p.faixa_34_38),
+          priceAgeGroup3943: parsePrice(p.faixa_39_43),
+          priceAgeGroup4448: parsePrice(p.faixa_44_48),
+          priceAgeGroup4953: parsePrice(p.faixa_49_53),
+          priceAgeGroup5458: parsePrice(p.faixa_54_58),
+          priceAgeGroup59Upper: parsePrice(p.faixa_59_plus),
+          coverageId: '(usar fetch_coverages — provavelmente Nacional: mnfztl1qjdondnbq0nh4pb70)',
+          segmentId: '(usar fetch_segments — provavelmente Amb + Hosp: kpwghigydyvu6jayqsxlr6aa)',
+        };
+        if (acom) product.accommodationId = acom.id + ' (' + acom.label + ')';
+        return product;
+      });
+
+      const exportObj = {
+        _instrucoes: [
+          'JSON estruturado para cadastro no Koter via MCP tool create_table_with_products.',
+          'PRE-REQUISITOS: 1) Criar/buscar Operator "Amil" (fetch_operators_cadastro ou create_operator).',
+          '2) Criar/buscar Plan vinculado ao Operator+Insurance do estado (fetch_plans_cadastro ou create_plan).',
+          '3) Usar o planId retornado no campo planId abaixo.',
+          '4) Buscar IDs das cidades com fetch_cities_by_state_name("' + params.estado + '").',
+          '5) Revisar coverageId e segmentId de cada produto (valores sugeridos podem precisar de ajuste).',
+          'Os precos ja estao parseados como numeros decimais prontos para uso.'
+        ],
+        _fonte: {
+          plataforma: 'Kit Corretor Amil',
+          linha: params.linha,
+          estado: params.estado,
+          numero_vidas: params.numero_vidas,
+          compulsoriedade: params.compulsoriedade,
+          coparticipacao: params.coparticipacao,
+          data_consulta: new Date().toISOString().split('T')[0]
+        },
+        create_table_with_products: {
+          userId: 'd2i4sdzg8nh7vy2egv4rjers',
+          planId: '(PREENCHER — ID do Plan Amil para ' + params.estado + ')',
+          name: buildTableName(params),
+          position: 1,
+          includesIOF: false,
+          isRefundable: false,
+          minCoveredLives: minVidas,
+          maxCoveredLives: maxVidas,
+          productsDefaults: {
+            includesCoparticipation: mapCoparticipacao(params.coparticipacao),
+            includesIOF: false,
+            isRefundable: false,
+            minCoveredLives: minVidas,
+            maxCoveredLives: maxVidas,
+            cities: ['(PREENCHER — IDs via fetch_cities_by_state_name)'],
+            ...(isPJ ? {
+              contractType: mapContractType(params.compulsoriedade),
+              lpts: params.compulsoriedade === 'MEI'
+                ? ['ovvlf58c04b9oofl6grakyqx (MEI)']
+                : ['c099jjy8it8jga4nicx6nxou (CNPJ Padrao)']
+            } : {})
+          },
+          products
+        }
+      };
+
+      return exportObj;
+    }
+
+    function buildNetworkExportJson(data, params) {
+      const allProviders = [];
+      for (const [categoria, items] of Object.entries(data)) {
+        if (!Array.isArray(items) || !items.length) continue;
+        for (const item of items) {
+          allProviders.push({
+            nome: item.nome,
+            cidade: item.cidade,
+            estado_regiao: item.estado,
+            regiao_amil: item.regiao,
+            modalidades: item.modalidades,
+            categoria_plano: categoria
+          });
+        }
+      }
+
+      // Deduplicate by nome+cidade
+      const seen = new Set();
+      const unique = [];
+      for (const p of allProviders) {
+        const key = p.nome + '|' + p.cidade;
+        if (!seen.has(key)) {
+          seen.add(key);
+          // Collect all categorias for this provider
+          const cats = allProviders.filter(x => x.nome === p.nome && x.cidade === p.cidade).map(x => x.categoria_plano);
+          unique.push({ ...p, presente_nos_produtos: [...new Set(cats)] });
+        }
+      }
+
+      const exportObj = {
+        _instrucoes: [
+          'JSON estruturado para cadastro de redes referenciadas no Koter.',
+          'FLUXO: Para cada prestador:',
+          '1) Buscar se ja existe: fetch_refnets_by_approximate_name_cadastro(name: "NOME").',
+          '2) Se NAO existe: buscar cityId com fetch_cities_by_state_name, depois create_referenced_network.',
+          '3) Vincular ao produto: add_refnet_to_product ou bulk_add_refnets_to_product.',
+          'O campo "presente_nos_produtos" indica em quais categorias (bronze/prata/ouro/platinum) o prestador aparece.',
+          'Deduplicado por nome+cidade (um prestador pode atender multiplos planos).'
+        ],
+        _fonte: {
+          plataforma: 'Kit Corretor Amil',
+          linha: params.linha,
+          regiao: params.regiao,
+          estado: params.estado,
+          tipo_rede: params.tipo_rede || 'Hospitais',
+          data_consulta: new Date().toISOString().split('T')[0]
+        },
+        resumo: {
+          total_registros: allProviders.length,
+          total_unicos: unique.length,
+          por_categoria: Object.fromEntries(
+            Object.entries(data).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])
+          )
+        },
+        prestadores: unique.map(p => ({
+          _koter_create_referenced_network: {
+            userId: 'd2i4sdzg8nh7vy2egv4rjers',
+            name: p.nome,
+            cityId: '(PREENCHER — buscar com fetch_cities_by_state_name para cidade "' + p.cidade + '")'
+          },
+          dados_amil: {
+            nome: p.nome,
+            cidade: p.cidade,
+            regiao_amil: p.regiao_amil,
+            modalidades: p.modalidades,
+            presente_nos_produtos: p.presente_nos_produtos
+          }
+        }))
+      };
+
+      return exportObj;
+    }
+
+    function downloadJson(data, filename) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function copyJson(data) {
+      const text = JSON.stringify(data, null, 2);
+      navigator.clipboard.writeText(text).then(() => {
+        const toast = document.createElement('div');
+        toast.textContent = 'JSON copiado!';
+        toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#0f0d59;color:white;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;animation:fadeout 2s forwards';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      });
+    }
+
+    // ─── PRICE TABLE LOGIC ─────────────────────────────────────────────────
+
+    async function initPriceForm() {
+      const linhas = await api.get('/api/linhas');
+      setOptions('price-linha', linhas, l => l.id, l => l.label, null);
+      await updatePriceOptions();
+    }
+
+    async function updatePriceOptions() {
+      const linha = document.getElementById('price-linha').value;
+      const opts = await api.get('/api/form-options?linha=' + encodeURIComponent(linha));
+      setOptions('price-estado', opts.estados, e => e, e => e, 'Selecione');
+      setOptions('price-vidas', opts.numero_vidas, v => v.value, v => v.label, null);
+      setOptions('price-compulsorio', opts.compulsoriedade, c => c.value, c => c.label, null);
+      setRadios('price-copart', opts.coparticipacao, 'coparticipacao');
+    }
+
+    document.getElementById('price-linha').addEventListener('change', updatePriceOptions);
+
+    document.getElementById('btn-search-prices').addEventListener('click', async () => {
+      const estado = document.getElementById('price-estado').value;
+      const linha = document.getElementById('price-linha').value;
+      const vidas = document.getElementById('price-vidas').value;
+      const compulsorio = document.getElementById('price-compulsorio').value;
+      const copart = document.querySelector('input[name="coparticipacao"]:checked')?.value;
+
+      if (!estado) { alert('Selecione um estado'); return; }
+
+      const loading = document.getElementById('price-loading');
+      const results = document.getElementById('price-results');
+      loading.classList.add('active');
+      results.innerHTML = '';
+
+      try {
+        lastPriceParams = { estado, numero_vidas: vidas, compulsoriedade: compulsorio, coparticipacao: copart, linha };
+        const plans = await api.post('/api/price-table', lastPriceParams);
+        lastPriceData = plans;
+
+        loading.classList.remove('active');
+
+        if (!plans.length) {
+          results.innerHTML = '<div class="empty-state"><p>Nenhum plano encontrado para os parametros selecionados.</p></div>';
+          return;
+        }
+
+        const faixas = ['0-18','19-23','24-28','29-33','34-38','39-43','44-48','49-53','54-58','59+'];
+
+        let html = `
+          <div class="results-card">
+            <div class="results-header">
+              <span>Tabela de Precos - ${estado}</span>
+              <span class="badge">${plans.length} plano(s)</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plano</th>
+                    <th>Acom.</th>
+                    <th>Categoria</th>
+                    <th>ANS</th>
+                    ${faixas.map(f => `<th>${f}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody>`;
+
+        plans.forEach(p => {
+          html += `<tr>
+            <td><strong>${p.nome}</strong></td>
+            <td>${p.tipo_acomodacao}</td>
+            <td><span class="category-badge ${getCategoryClass(p.categoria)}">${p.categoria}</span></td>
+            <td>${p.registro_ans}</td>
+            <td class="price">R$ ${p.faixa_0_18}</td>
+            <td class="price">R$ ${p.faixa_19_23}</td>
+            <td class="price">R$ ${p.faixa_24_28}</td>
+            <td class="price">R$ ${p.faixa_29_33}</td>
+            <td class="price">R$ ${p.faixa_34_38}</td>
+            <td class="price">R$ ${p.faixa_39_43}</td>
+            <td class="price">R$ ${p.faixa_44_48}</td>
+            <td class="price">R$ ${p.faixa_49_53}</td>
+            <td class="price">R$ ${p.faixa_54_58}</td>
+            <td class="price">R$ ${p.faixa_59_plus}</td>
+          </tr>`;
+        });
+
+        html += `</tbody></table></div>
+            <div class="export-bar">
+              <button class="btn-export" onclick="copyJson(buildPriceExportJson(lastPriceData, lastPriceParams))">&#128203; Copiar JSON Koter</button>
+              <button class="btn-export" onclick="downloadJson(buildPriceExportJson(lastPriceData, lastPriceParams), 'amil-precos-'+lastPriceParams.estado.toLowerCase().replace(/ /g,'-')+'.json')">&#11015; Exportar JSON Koter</button>
+            </div>
+          </div>`;
+        results.innerHTML = html;
+      } catch (err) {
+        loading.classList.remove('active');
+        results.innerHTML = `<div class="empty-state"><p>Erro: ${err.message}</p></div>`;
+      }
+    });
+
+    // ─── NETWORK LOGIC ─────────────────────────────────────────────────────
+
+    async function initNetworkForm() {
+      const linhas = await api.get('/api/linhas');
+      setOptions('net-linha', linhas, l => l.id, l => l.label, null);
+    }
+
+    document.getElementById('net-regiao').addEventListener('change', async () => {
+      const regiao = document.getElementById('net-regiao').value;
+      const linha = document.getElementById('net-linha').value;
+      if (!regiao) return;
+
+      const states = await api.get(`/api/states?regiao=${encodeURIComponent(regiao)}&linha=${encodeURIComponent(linha)}`);
+      setOptions('net-estado', states, s => s.name, s => s.name, 'Selecione');
+    });
+
+    document.getElementById('net-linha').addEventListener('change', () => {
+      document.getElementById('net-estado').innerHTML = '<option value="">Selecione uma regiao primeiro</option>';
+      document.getElementById('net-regiao').value = '';
+    });
+
+    document.getElementById('btn-search-network').addEventListener('click', async () => {
+      const regiao = document.getElementById('net-regiao').value;
+      const estado = document.getElementById('net-estado').value;
+      const linha = document.getElementById('net-linha').value;
+      const tipo = document.getElementById('net-tipo').value;
+
+      if (!regiao || !estado) { alert('Selecione regiao e estado'); return; }
+
+      const loading = document.getElementById('net-loading');
+      const results = document.getElementById('net-results');
+      loading.classList.add('active');
+      results.innerHTML = '';
+
+      try {
+        lastNetworkParams = { regiao, estado, linha, tipo_rede: tipo };
+        const data = await api.post('/api/network', lastNetworkParams);
+        lastNetworkData = data;
+
+        loading.classList.remove('active');
+
+        const categories = Object.entries(data).filter(([, items]) => items.length > 0);
+        if (!categories.length) {
+          results.innerHTML = '<div class="empty-state"><p>Nenhum prestador encontrado.</p></div>';
+          return;
+        }
+
+        let html = `<div class="export-bar" style="background:var(--card);border-radius:var(--radius);margin-bottom:16px;justify-content:flex-start">
+          <button class="btn-export" onclick="copyJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams))">&#128203; Copiar JSON Koter (Redes)</button>
+          <button class="btn-export" onclick="downloadJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams), 'amil-rede-'+lastNetworkParams.estado.toLowerCase().replace(/ /g,'-')+'.json')">&#11015; Exportar JSON Koter (Redes)</button>
+        </div>`;
+        for (const [cat, items] of categories) {
+          html += `
+            <div class="network-category">
+              <div class="results-card">
+                <div class="results-header">
+                  <span><span class="category-badge ${getCategoryClass(cat)}">${cat.toUpperCase()}</span> - ${estado}</span>
+                  <span class="badge">${items.length} prestador(es)</span>
+                </div>
+                <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+                  <input type="text" class="filter-input" placeholder="Filtrar por nome, cidade..." oninput="filterTable(this)">
+                </div>
+                <div class="table-scroll">
+                  <table class="filterable">
+                    <thead>
+                      <tr>
+                        <th>Nome</th>
+                        <th>Cidade</th>
+                        <th>Regiao</th>
+                        <th>Modalidades</th>
+                      </tr>
+                    </thead>
+                    <tbody>`;
+
+          for (const item of items) {
+            html += `<tr>
+              <td><strong>${item.nome}</strong></td>
+              <td>${item.cidade}</td>
+              <td>${item.regiao}</td>
+              <td>${item.modalidades}</td>
+            </tr>`;
+          }
+
+          html += '</tbody></table></div></div></div>';
+        }
+
+        results.innerHTML = html;
+      } catch (err) {
+        loading.classList.remove('active');
+        results.innerHTML = `<div class="empty-state"><p>Erro: ${err.message}</p></div>`;
+      }
+    });
+
+    function filterTable(input) {
+      const query = input.value.toLowerCase();
+      const tbody = input.closest('.results-card').querySelector('tbody');
+      tbody.querySelectorAll('tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
+      });
+    }
+
+    // ─── Init ──────────────────────────────────────────────────────────────
+    initPriceForm();
+    initNetworkForm();
+  </script>
+</body>
+</html>
