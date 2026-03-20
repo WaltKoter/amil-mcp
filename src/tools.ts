@@ -525,6 +525,15 @@ export function registerTools(server: McpServer) {
       }
       const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
 
+      // Group ALL plans sharing the same API provider key
+      const plansByApiKey: Record<string, typeof plans> = {};
+      for (const p of plans) {
+        const apiKey = catApiKeyMap[p.categoria];
+        if (!apiKey) continue;
+        if (!plansByApiKey[apiKey]) plansByApiKey[apiKey] = [];
+        plansByApiKey[apiKey].push(p);
+      }
+
       // Get refnet IDs per plan (filtered by sub-column acceptance)
       const planRefnetMap: Record<string, string[]> = {};
       const promises: Promise<void>[] = [];
@@ -541,8 +550,8 @@ export function registerTools(server: McpServer) {
         if (numSubCols <= 1) {
           filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
         } else {
-          const plansInCat = plansByCategory[plan.categoria] || [];
-          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
+          const allPlansForApiKey = apiCatKey ? (plansByApiKey[apiCatKey] || []) : (plansByCategory[plan.categoria] || []);
+          const subColIdx = getSubColumnIndex(plan.nome, allPlansForApiKey, numSubCols);
           filteredProviders = allProviders
             .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
             .map(p => ({ nome: p.nome, cidade: p.cidade }));

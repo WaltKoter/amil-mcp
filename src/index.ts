@@ -761,6 +761,16 @@ async function main() {
       const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
       console.log("[Super Route] Category mapping:", JSON.stringify(catApiKeyMap));
 
+      // Group ALL plans that share the same API provider category key
+      // (e.g., Black 01 and Black 02 both map to "one_black")
+      const plansByApiKey: Record<string, typeof plans> = {};
+      for (const plan of plans) {
+        const apiKey = catApiKeyMap[plan.categoria];
+        if (!apiKey) continue;
+        if (!plansByApiKey[apiKey]) plansByApiKey[apiKey] = [];
+        plansByApiKey[apiKey].push(plan);
+      }
+
       // For each plan, filter providers that accept it and get their refnet IDs
       const planRefnetMap: Record<string, string[]> = {};
       const refnetPromises: Promise<void>[] = [];
@@ -779,10 +789,10 @@ async function main() {
           // Single sub-column: all providers in the category accept this plan
           filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
         } else {
-          // Multiple sub-columns: determine which one this plan maps to
-          const plansInCat = plansByCategory[plan.categoria] || [];
-          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
-          console.log(`[Super Route] Plan "${plan.nome}" (${plan.tipo_acomodacao}) → subCol ${subColIdx} of ${numSubCols}`);
+          // Multiple sub-columns: use ALL plans sharing the same API key for index calculation
+          const allPlansForApiKey = apiCatKey ? (plansByApiKey[apiCatKey] || []) : (plansByCategory[plan.categoria] || []);
+          const subColIdx = getSubColumnIndex(plan.nome, allPlansForApiKey, numSubCols);
+          console.log(`[Super Route] Plan "${plan.nome}" (${plan.tipo_acomodacao}) → subCol ${subColIdx} of ${numSubCols} [apiKey=${apiCatKey}]`);
 
           filteredProviders = allProviders
             .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
@@ -923,6 +933,15 @@ async function main() {
 
       const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
 
+      // Group ALL plans sharing the same API provider key
+      const plansByApiKey: Record<string, typeof plans> = {};
+      for (const p of plans) {
+        const apiKey = catApiKeyMap[p.categoria];
+        if (!apiKey) continue;
+        if (!plansByApiKey[apiKey]) plansByApiKey[apiKey] = [];
+        plansByApiKey[apiKey].push(p);
+      }
+
       // Deduplicate by plan name + acomodação
       const seen = new Set<string>();
       const uniquePlans = plans.filter(p => {
@@ -946,8 +965,8 @@ async function main() {
         if (numSubCols <= 1) {
           filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
         } else {
-          const plansInCat = plansByCategory[plan.categoria] || [];
-          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
+          const allPlansForApiKey = apiCatKey ? (plansByApiKey[apiCatKey] || []) : (plansByCategory[plan.categoria] || []);
+          const subColIdx = getSubColumnIndex(plan.nome, allPlansForApiKey, numSubCols);
           filteredProviders = allProviders
             .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
             .map(p => ({ nome: p.nome, cidade: p.cidade }));
