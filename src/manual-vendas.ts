@@ -211,7 +211,7 @@ function matchCity(
 
 // ─── State abbreviation to full name mapping ─────────────────────────────────
 
-const UF_TO_NAME: Record<string, string> = {
+export const UF_TO_NAME: Record<string, string> = {
   AC: "Acre", AL: "Alagoas", AP: "Amapá", AM: "Amazonas",
   BA: "Bahia", CE: "Ceará", DF: "Distrito Federal", ES: "Espírito Santo",
   GO: "Goiás", MA: "Maranhão", MT: "Mato Grosso", MS: "Mato Grosso do Sul",

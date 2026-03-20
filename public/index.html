@@ -362,6 +362,7 @@
     <div class="tab" data-panel="network">Rede de Prestadores</div>
     <div class="tab" data-panel="mapping">Mapeamento Koter</div>
     <div class="tab" data-panel="comercializacao">Comercialização</div>
+    <div class="tab" data-panel="super">Produto Completo</div>
   </div>
 
   <div class="container">
@@ -543,6 +544,44 @@
       </div>
 
       <div id="comerc-results"></div>
+    </div>
+
+    <!-- ─── SUPER ROUTE PANEL (Produto Completo) ───────────────────────── -->
+    <div class="panel" id="panel-super">
+      <div class="form-card">
+        <h2>Produto Completo para Koter</h2>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:16px">Gera um JSON completo com preços, redes referenciadas e áreas de comercialização prontos para importação no Koter.</p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Linha de Produtos</label>
+            <select id="super-linha"></select>
+          </div>
+          <div class="form-group">
+            <label>Estado</label>
+            <select id="super-estado"></select>
+          </div>
+          <div class="form-group">
+            <label>Numero de Vidas</label>
+            <select id="super-vidas"></select>
+          </div>
+          <div class="form-group">
+            <label>Compulsoriedade</label>
+            <select id="super-compulsorio"></select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:16px">
+          <label>Coparticipação</label>
+          <div class="radio-group" id="super-copart"></div>
+        </div>
+        <button class="btn" id="btn-super-generate" style="background:#8e44ad">Gerar Produto Completo</button>
+      </div>
+
+      <div class="loading" id="super-loading">
+        <div class="spinner"></div>
+        <div>Gerando produto completo (preços + redes + cidades)...</div>
+      </div>
+
+      <div id="super-results"></div>
     </div>
   </div>
 
@@ -1747,9 +1786,154 @@
       downloadJson(result, `koter-comercializacao-${estado.toLowerCase()}.json`);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ─── SUPER ROUTE TAB (Produto Completo) ──────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let lastSuperData = null;
+
+    async function initSuperForm() {
+      const linhas = await api.get('/api/linhas');
+      setOptions('super-linha', linhas, l => l.id, l => l.label, null);
+      await updateSuperOptions();
+    }
+
+    async function updateSuperOptions() {
+      const linha = document.getElementById('super-linha').value;
+      const opts = await api.get('/api/form-options?linha=' + encodeURIComponent(linha));
+      setOptions('super-estado', opts.estados, e => e, e => e, 'Selecione');
+      setOptions('super-vidas', opts.numero_vidas, v => v.value, v => v.label, null);
+      setOptions('super-compulsorio', opts.compulsoriedade, c => c.value, c => c.label, null);
+      setRadios('super-copart', opts.coparticipacao, 'super_coparticipacao');
+    }
+
+    document.getElementById('super-linha').addEventListener('change', updateSuperOptions);
+
+    document.getElementById('btn-super-generate').addEventListener('click', async () => {
+      const estado = document.getElementById('super-estado').value;
+      const linha = document.getElementById('super-linha').value;
+      const vidas = document.getElementById('super-vidas').value;
+      const compulsorio = document.getElementById('super-compulsorio').value;
+      const copart = document.querySelector('input[name="super_coparticipacao"]:checked')?.value;
+
+      if (!estado) { alert('Selecione um estado'); return; }
+      if (!copart) { alert('Selecione a coparticipação'); return; }
+
+      const btn = document.getElementById('btn-super-generate');
+      const loading = document.getElementById('super-loading');
+      const results = document.getElementById('super-results');
+      btn.disabled = true;
+      loading.classList.add('active');
+      results.innerHTML = '';
+
+      try {
+        const data = await api.post('/api/super-route', {
+          linha, estado, numero_vidas: vidas,
+          compulsoriedade: compulsorio, coparticipacao: copart,
+        });
+        lastSuperData = data;
+        renderSuperResults(data);
+      } catch (err) {
+        results.innerHTML = `<div class="form-card" style="color:#e74c3c">Erro: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        loading.classList.remove('active');
+      }
+    });
+
+    function renderSuperResults(data) {
+      const container = document.getElementById('super-results');
+      if (!data.planos || data.planos.length === 0) {
+        container.innerHTML = '<div class="form-card" style="text-align:center;padding:48px"><p style="color:var(--text-light)">Nenhum plano encontrado para os parâmetros selecionados.</p></div>';
+        return;
+      }
+
+      const f = data.filtros;
+      let html = '';
+
+      // Summary bar
+      const totalRefnets = new Set(data.planos.flatMap(p => p.redes_referenciadas.refnet_ids)).size;
+      const totalCities = new Set(data.planos.flatMap(p => p.area_comercializacao.cidade_ids)).size;
+      const regionais = data.planos.filter(p => p.abrangencia.tipo === 'REGIONAL').length;
+      const nacionais = data.planos.filter(p => p.abrangencia.tipo === 'NACIONAL').length;
+
+      html += `<div class="form-card" style="margin-bottom:16px">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <span style="font-weight:600;color:var(--primary)">${data.planos.length} planos</span>
+          <span class="status-badge status-mapped">${totalRefnets} redes</span>
+          <span class="status-badge" style="background:#3498db22;color:#3498db;border-color:#3498db44">${totalCities} cidades</span>
+          ${regionais > 0 ? `<span class="status-badge" style="background:#e67e2222;color:#e67e22;border-color:#e67e2244">${regionais} regionais</span>` : ''}
+          ${nacionais > 0 ? `<span class="status-badge" style="background:#9b59b622;color:#9b59b6;border-color:#9b59b644">${nacionais} nacionais</span>` : ''}
+          <button class="btn" style="margin-left:auto;font-size:13px;padding:8px 16px;background:var(--accent)" onclick="downloadJson(lastSuperData, 'koter-produto-completo.json')">Exportar JSON</button>
+          <button class="btn" style="font-size:13px;padding:8px 16px;background:var(--primary)" onclick="copyJson(lastSuperData)">Copiar JSON</button>
+        </div>
+      </div>`;
+
+      // Plan cards
+      const faixaLabels = ['0-18','19-23','24-28','29-33','34-38','39-43','44-48','49-53','54-58','59+'];
+      const faixaKeys = ['faixa_0_18','faixa_19_23','faixa_24_28','faixa_29_33','faixa_34_38','faixa_39_43','faixa_44_48','faixa_49_53','faixa_54_58','faixa_59_plus'];
+
+      for (const plan of data.planos) {
+        const isRegional = plan.abrangencia.tipo === 'REGIONAL';
+        const abColor = isRegional ? '#e67e22' : '#9b59b6';
+
+        html += `<div class="results-card" style="margin-bottom:16px">`;
+        html += `<div class="results-header" style="display:flex;justify-content:space-between;align-items:center">`;
+        html += `<span><strong>${plan.nome}</strong> <small style="opacity:0.7">${plan.tipo_acomodacao}</small></span>`;
+        html += `<span style="display:flex;gap:8px;align-items:center">`;
+        html += `<span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:${abColor}44;color:white">${plan.abrangencia.tipo}</span>`;
+        html += `<span style="font-size:12px;opacity:0.8">${plan.categoria}</span>`;
+        html += `</span></div>`;
+
+        // Info row
+        html += `<div style="padding:12px 24px;display:flex;gap:24px;flex-wrap:wrap;font-size:13px;border-bottom:1px solid var(--border);background:#f9f9fb">`;
+        html += `<span><strong>ANS:</strong> ${plan.registro_ans || '-'}</span>`;
+        html += `<span><strong>Código:</strong> ${plan.codigo_plano || '-'}</span>`;
+        html += `<span><strong>Vidas:</strong> ${plan.faixa_vidas || '-'}</span>`;
+        if (isRegional) html += `<span><strong>Região:</strong> ${plan.abrangencia.rotulo}</span>`;
+        html += `</div>`;
+
+        // Prices
+        html += `<div style="padding:12px 24px;border-bottom:1px solid var(--border)">`;
+        html += `<div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-light);margin-bottom:8px">Preços por Faixa Etária</div>`;
+        html += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+        for (let i = 0; i < faixaLabels.length; i++) {
+          const val = plan[faixaKeys[i]] || '-';
+          html += `<div style="text-align:center;min-width:70px;padding:6px 8px;background:var(--bg);border-radius:6px">`;
+          html += `<div style="font-size:10px;color:var(--text-light)">${faixaLabels[i]}</div>`;
+          html += `<div style="font-size:13px;font-weight:600">${val}</div>`;
+          html += `</div>`;
+        }
+        html += `</div></div>`;
+
+        // Redes referenciadas
+        const refCount = plan.redes_referenciadas.refnet_ids.length;
+        html += `<div style="padding:12px 24px;border-bottom:1px solid var(--border)">`;
+        html += `<div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-light);margin-bottom:4px">Redes Referenciadas</div>`;
+        html += refCount > 0
+          ? `<span style="font-size:13px;color:#27ae60;font-weight:600">${refCount} redes vinculadas</span>`
+          : `<span style="font-size:13px;color:#e74c3c">Nenhuma rede mapeada (carregue e mapeie redes na aba Mapeamento Koter)</span>`;
+        html += `</div>`;
+
+        // Cidades
+        const cityCount = plan.area_comercializacao.cidade_ids.length;
+        html += `<div style="padding:12px 24px">`;
+        html += `<div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-light);margin-bottom:4px">Área de Comercialização</div>`;
+        html += cityCount > 0
+          ? `<span style="font-size:13px;color:#3498db;font-weight:600">${cityCount} cidades</span>`
+          : `<span style="font-size:13px;color:#e74c3c">Nenhuma cidade encontrada (verifique na aba Comercialização)</span>`;
+        html += `</div>`;
+
+        html += `</div>`;
+      }
+
+      container.innerHTML = html;
+    }
+
     // ─── Init ──────────────────────────────────────────────────────────────
     initPriceForm();
     initNetworkForm();
+    initSuperForm();
   </script>
 </body>
 </html>

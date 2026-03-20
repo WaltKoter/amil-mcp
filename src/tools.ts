@@ -8,7 +8,7 @@ import {
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
-import { getComercializacaoByState } from "./manual-vendas.js";
+import { getComercializacaoByState, UF_TO_NAME } from "./manual-vendas.js";
 import { getKoterCitiesByState } from "./koter-cities.js";
 import {
   getAllStoredProviders,
@@ -16,6 +16,7 @@ import {
   getProviderStates,
   getAllMappings,
   exportRefnetsForKoter,
+  getRefnetIdsByCategoria,
 } from "./mapping-store.js";
 
 export function registerTools(server: McpServer) {
@@ -449,6 +450,107 @@ export function registerTools(server: McpServer) {
           text: JSON.stringify(result, null, 2),
         }],
       };
+    }
+  );
+
+  // ─── Tool: super_route (produto completo) ─────────────────────────────────
+
+  const ESTADO_TO_REGIAO: Record<string, string> = {
+    "BAHIA": "Nordeste", "CEARÁ": "Nordeste", "MARANHÃO": "Nordeste",
+    "PARAÍBA": "Nordeste", "PERNAMBUCO": "Nordeste", "RIO GRANDE DO NORTE": "Nordeste",
+    "RIO DE JANEIRO": "Sudeste", "SÃO PAULO": "Sudeste", "MINAS GERAIS": "Sudeste",
+    "INTERIOR SP - 1": "Sudeste", "INTERIOR SP - 2": "Sudeste",
+    "DISTRITO FEDERAL": "Centro-Oeste", "GOIÁS": "Centro-Oeste",
+    "PARANÁ": "Sul", "RIO GRANDE DO SUL": "Sul", "SANTA CATARINA": "Sul",
+  };
+
+  function estadoToUF(estado: string): string | null {
+    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const estadoNorm = norm(estado);
+    if (estadoNorm.length === 2 && UF_TO_NAME[estadoNorm]) return estadoNorm;
+    const spMatch = estadoNorm.match(/\bSP\b/);
+    if (spMatch) return "SP";
+    const rjMatch = estadoNorm.match(/\bRJ\b/);
+    if (rjMatch) return "RJ";
+    for (const [uf, name] of Object.entries(UF_TO_NAME)) {
+      if (norm(name) === estadoNorm) return uf;
+    }
+    return null;
+  }
+
+  server.tool(
+    "amil_super_route",
+    "Gera produto completo para importação no Koter. Combina tabela de preços da Amil, redes referenciadas mapeadas e áreas de comercialização em um único JSON. Retorna planos com preços, abrangência (regional/nacional), cidade_ids e refnet_ids.",
+    {
+      linha: z.string().describe("Linha de produto Amil (ex: 'Linha Amil', 'Linha Amil Black', 'Linha Selecionada')"),
+      estado: z.string().describe("Estado (ex: 'SÃO PAULO', 'INTERIOR SP - 1', 'RIO DE JANEIRO')"),
+      numero_vidas: z.string().describe("Faixa de vidas (ex: '2', '3 a 4', '5 a 29', '30 a 99', '100 a 199')"),
+      compulsoriedade: z.string().describe("Tipo de empresa (ex: 'MEI', 'Demais empresas', 'Compulsório', 'Livre Adesão')"),
+      coparticipacao: z.string().describe("Coparticipação (ex: 'Com coparticipação30', 'Com coparticipação parcial', 'Sem coparticipação')"),
+    },
+    async (params) => {
+      const { linha, estado, numero_vidas, compulsoriedade, coparticipacao } = params;
+
+      const uf = estadoToUF(estado);
+      const linhaInfo = ALL_LINHAS.find(l => l.id === linha);
+
+      const [plans, comercializacao] = await Promise.all([
+        getPriceTable({ estado, numero_vidas, compulsoriedade, coparticipacao, linha }),
+        (async () => {
+          if (!uf) return { produtos_regionais: [] as any[], produtos_nacionais: [] as any[] };
+          try {
+            const koterCities = await getKoterCitiesByState(uf);
+            return await getComercializacaoByState(uf, koterCities);
+          } catch {
+            return { produtos_regionais: [] as any[], produtos_nacionais: [] as any[] };
+          }
+        })(),
+      ]);
+
+      if (!plans || plans.length === 0) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ filtros: { linha, estado, numero_vidas, compulsoriedade, coparticipacao }, planos: [] }, null, 2) }] };
+      }
+
+      const uniqueCats = [...new Set(plans.map(p => p.categoria))];
+      const refnetMap: Record<string, string[]> = {};
+      await Promise.all(uniqueCats.map(async (cat) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat); }));
+
+      const nacionalCityIds = comercializacao.produtos_nacionais.filter((c: any) => c.koterCityId).map((c: any) => c.koterCityId);
+      const normMatch = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+
+      const planos = plans.map(plan => {
+        const catNorm = normMatch(plan.categoria);
+        const regionalMatch = comercializacao.produtos_regionais.find((rp: any) => normMatch(rp.produto).includes(catNorm));
+
+        const abrangencia = regionalMatch
+          ? { tipo: "REGIONAL", rotulo: regionalMatch.produto, estados: uf ? [uf] : [], observacao: null }
+          : { tipo: "NACIONAL", rotulo: "Nacional", estados: uf ? [uf] : [], observacao: null };
+
+        const cidadeIds = regionalMatch
+          ? regionalMatch.cidades.filter((c: any) => c.koterCityId).map((c: any) => c.koterCityId)
+          : nacionalCityIds;
+
+        return {
+          nome: plan.nome, registro_ans: plan.registro_ans, codigo_plano: plan.codigo_plano,
+          categoria: plan.categoria, tipo_acomodacao: plan.tipo_acomodacao,
+          faixa_vidas: plan.faixa_vidas || numero_vidas,
+          faixa_0_18: plan.faixa_0_18, faixa_19_23: plan.faixa_19_23,
+          faixa_24_28: plan.faixa_24_28, faixa_29_33: plan.faixa_29_33,
+          faixa_34_38: plan.faixa_34_38, faixa_39_43: plan.faixa_39_43,
+          faixa_44_48: plan.faixa_44_48, faixa_49_53: plan.faixa_49_53,
+          faixa_54_58: plan.faixa_54_58, faixa_59_plus: plan.faixa_59_plus,
+          abrangencia,
+          area_comercializacao: { cidade_ids: cidadeIds },
+          redes_referenciadas: { refnet_ids: refnetMap[plan.categoria] || [] },
+        };
+      });
+
+      const result = {
+        filtros: { linha, linha_rotulo: linhaInfo?.label || linha, estado, numero_vidas, compulsoriedade, coparticipacao },
+        planos,
+      };
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     }
   );
 }

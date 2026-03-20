@@ -30,13 +30,14 @@ import {
   getProviderStates,
   getProviderStats,
   clearAllProviders,
+  getRefnetIdsByCategoria,
   type AllProvider,
 } from "./mapping-store.js";
 import {
   searchKoterRefnets as searchKoterRefnetsLive,
   createKoterRefnet,
 } from "./koter-client.js";
-import { getComercializacaoByState } from "./manual-vendas.js";
+import { getComercializacaoByState, UF_TO_NAME } from "./manual-vendas.js";
 import { getKoterCitiesByState } from "./koter-cities.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -580,6 +581,156 @@ async function main() {
     }
 
     res.end();
+  });
+
+  // ─── Super Route (produto completo para Koter) ──────────────────────────
+
+  const ESTADO_TO_REGIAO: Record<string, string> = {
+    "BAHIA": "Nordeste", "CEARÁ": "Nordeste", "MARANHÃO": "Nordeste",
+    "PARAÍBA": "Nordeste", "PERNAMBUCO": "Nordeste", "RIO GRANDE DO NORTE": "Nordeste",
+    "RIO DE JANEIRO": "Sudeste", "SÃO PAULO": "Sudeste", "MINAS GERAIS": "Sudeste",
+    "INTERIOR SP - 1": "Sudeste", "INTERIOR SP - 2": "Sudeste",
+    "DISTRITO FEDERAL": "Centro-Oeste", "GOIÁS": "Centro-Oeste",
+    "PARANÁ": "Sul", "RIO GRANDE DO SUL": "Sul", "SANTA CATARINA": "Sul",
+  };
+
+  function estadoToUF(estado: string): string | null {
+    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const estadoNorm = norm(estado);
+    // Direct UF match
+    if (estadoNorm.length === 2 && UF_TO_NAME[estadoNorm]) return estadoNorm;
+    // "INTERIOR SP - 1" → "SP"
+    const spMatch = estadoNorm.match(/\bSP\b/);
+    if (spMatch) return "SP";
+    const rjMatch = estadoNorm.match(/\bRJ\b/);
+    if (rjMatch) return "RJ";
+    // Full name reverse lookup
+    for (const [uf, name] of Object.entries(UF_TO_NAME)) {
+      if (norm(name) === estadoNorm) return uf;
+    }
+    return null;
+  }
+
+  app.post("/api/super-route", async (req, res) => {
+    try {
+      const { linha, estado, numero_vidas, compulsoriedade, coparticipacao } = req.body;
+      if (!linha || !estado || !numero_vidas || !compulsoriedade || !coparticipacao) {
+        res.status(400).json({ error: "Campos obrigatórios: linha, estado, numero_vidas, compulsoriedade, coparticipacao" });
+        return;
+      }
+
+      const uf = estadoToUF(estado);
+      const regiao = ESTADO_TO_REGIAO[estado] || ESTADO_TO_REGIAO[estado.toUpperCase()] || "Sudeste";
+      const linhaInfo = ALL_LINHAS.find(l => l.id === linha);
+
+      // 1. Fetch price table + comercialização in parallel
+      const [plans, comercializacao] = await Promise.all([
+        getPriceTable({ estado, numero_vidas, compulsoriedade, coparticipacao, linha }),
+        (async () => {
+          if (!uf) return { produtos_regionais: [], produtos_nacionais: [] };
+          try {
+            const koterCities = await getKoterCitiesByState(uf);
+            return await getComercializacaoByState(uf, koterCities);
+          } catch (err: any) {
+            console.warn("[Super Route] Comercialização error:", err.message);
+            return { produtos_regionais: [], produtos_nacionais: [] };
+          }
+        })(),
+      ]);
+
+      if (!plans || plans.length === 0) {
+        res.json({ filtros: { linha, linha_rotulo: linhaInfo?.label || linha, estado, numero_vidas, compulsoriedade, coparticipacao }, planos: [] });
+        return;
+      }
+
+      // 2. Collect unique categorias and fetch refnet IDs for each
+      const uniqueCats = [...new Set(plans.map(p => p.categoria))];
+      const refnetMap: Record<string, string[]> = {};
+      await Promise.all(uniqueCats.map(async (cat) => {
+        refnetMap[cat] = await getRefnetIdsByCategoria(cat);
+      }));
+
+      // 3. Pre-compute nacional city IDs (filtered to non-null)
+      const nacionalCityIds = comercializacao.produtos_nacionais
+        .filter(c => c.koterCityId)
+        .map(c => c.koterCityId!);
+
+      // 4. Normalize helper for regional matching
+      const normMatch = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+
+      // 5. Build enriched plans
+      const planos = plans.map(plan => {
+        // Match plan's categoria to a regional product from comercializacao
+        const catNorm = normMatch(plan.categoria);
+        const regionalMatch = comercializacao.produtos_regionais.find(rp =>
+          normMatch(rp.produto).includes(catNorm)
+        );
+
+        let abrangencia;
+        let cidadeIds: string[];
+
+        if (regionalMatch) {
+          cidadeIds = regionalMatch.cidades
+            .filter(c => c.koterCityId)
+            .map(c => c.koterCityId!);
+          abrangencia = {
+            tipo: "REGIONAL",
+            rotulo: regionalMatch.produto,
+            estados: uf ? [uf] : [],
+            observacao: null,
+          };
+        } else {
+          cidadeIds = nacionalCityIds;
+          abrangencia = {
+            tipo: "NACIONAL",
+            rotulo: "Nacional",
+            estados: uf ? [uf] : [],
+            observacao: null,
+          };
+        }
+
+        return {
+          nome: plan.nome,
+          registro_ans: plan.registro_ans,
+          codigo_plano: plan.codigo_plano,
+          categoria: plan.categoria,
+          tipo_acomodacao: plan.tipo_acomodacao,
+          faixa_vidas: plan.faixa_vidas || numero_vidas,
+          faixa_0_18: plan.faixa_0_18,
+          faixa_19_23: plan.faixa_19_23,
+          faixa_24_28: plan.faixa_24_28,
+          faixa_29_33: plan.faixa_29_33,
+          faixa_34_38: plan.faixa_34_38,
+          faixa_39_43: plan.faixa_39_43,
+          faixa_44_48: plan.faixa_44_48,
+          faixa_49_53: plan.faixa_49_53,
+          faixa_54_58: plan.faixa_54_58,
+          faixa_59_plus: plan.faixa_59_plus,
+          abrangencia,
+          area_comercializacao: {
+            cidade_ids: cidadeIds,
+          },
+          redes_referenciadas: {
+            refnet_ids: refnetMap[plan.categoria] || [],
+          },
+        };
+      });
+
+      res.json({
+        filtros: {
+          linha,
+          linha_rotulo: linhaInfo?.label || linha,
+          estado,
+          numero_vidas,
+          compulsoriedade,
+          coparticipacao,
+        },
+        planos,
+      });
+    } catch (err: any) {
+      console.error("[Super Route] Erro:", err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ─── MCP Endpoint (session-aware) ─────────────────────────────────────────

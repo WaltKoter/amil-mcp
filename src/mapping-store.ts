@@ -170,6 +170,20 @@ export async function getProviderStats(filters?: { estado?: string; tipoRede?: s
   return { total, mapped, pending: total - mapped };
 }
 
+export async function getRefnetIdsByCategoria(
+  categoria: string,
+  tipoRede = "Hospitais"
+): Promise<string[]> {
+  const result = await query(
+    `SELECT DISTINCT m.koter_refnet_id
+     FROM all_providers p
+     INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+     WHERE p.categorias LIKE $1 AND p.tipo_rede = $2`,
+    [`%"${categoria}"%`, tipoRede]
+  );
+  return result.rows.map((r: any) => r.koter_refnet_id);
+}
+
 export async function clearAllProviders(tipoRede?: string): Promise<void> {
   if (tipoRede) {
     await query(`DELETE FROM all_providers WHERE tipo_rede = $1`, [tipoRede]);
