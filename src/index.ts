@@ -291,6 +291,110 @@ async function main() {
     }
   });
 
+  // Bulk create all unmapped providers in Koter (SSE for progress)
+  app.get("/api/mappings/bulk-create", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    const send = (data: any) => {
+      if (!aborted) res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const estado = req.query.estado as string | undefined;
+      const tipoRede = req.query.tipo_rede as string | undefined;
+
+      // Get all unmapped providers
+      let allUnmapped: AllProvider[] = [];
+      let pg = 1;
+      while (true) {
+        const result = await getAllStoredProviders({
+          estado,
+          tipoRede,
+          status: "pending",
+          page: pg,
+          pageSize: 500,
+        });
+        allUnmapped = allUnmapped.concat(result.providers);
+        if (allUnmapped.length >= result.total || result.providers.length === 0) break;
+        pg++;
+      }
+
+      if (!allUnmapped.length) {
+        send({ type: "done", created: 0, failed: 0, skipped: 0, total: 0 });
+        res.end();
+        return;
+      }
+
+      send({ type: "start", total: allUnmapped.length });
+
+      // Cache resolved cities per state to avoid repeated lookups
+      const cityCache: Record<string, Array<{ id: string; name: string }>> = {};
+      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+
+      let created = 0, failed = 0, skipped = 0;
+
+      for (let i = 0; i < allUnmapped.length; i++) {
+        if (aborted) break;
+        const p = allUnmapped[i];
+
+        try {
+          // Resolve city
+          if (!cityCache[p.estado]) {
+            try {
+              cityCache[p.estado] = await getKoterCitiesByState(p.estado);
+            } catch {
+              cityCache[p.estado] = [];
+            }
+          }
+
+          const cities = cityCache[p.estado];
+          const amilCityNorm = normCity(p.cidade);
+          const cityMatch = cities.find((c) => normCity(c.name) === amilCityNorm);
+
+          if (!cityMatch) {
+            skipped++;
+            send({ type: "progress", done: i + 1, total: allUnmapped.length, created, failed, skipped, current: p.nome, status: "skipped", reason: `Cidade "${p.cidade}" não encontrada` });
+            continue;
+          }
+
+          // Create refnet in Koter
+          const refnet = await createKoterRefnet(p.nome, cityMatch.id);
+
+          // Auto-map
+          await upsertMapping({
+            amilNome: p.nome,
+            amilCidade: p.cidade,
+            amilEstado: p.estado,
+            koterRefnetId: refnet.id,
+            koterRefnetName: refnet.name,
+            createdAt: "",
+          });
+
+          created++;
+          send({ type: "progress", done: i + 1, total: allUnmapped.length, created, failed, skipped, current: p.nome, status: "created" });
+
+          // Small delay to not hammer the API
+          await new Promise((r) => setTimeout(r, 150));
+        } catch (err: any) {
+          failed++;
+          send({ type: "progress", done: i + 1, total: allUnmapped.length, created, failed, skipped, current: p.nome, status: "error", reason: err.message });
+        }
+      }
+
+      send({ type: "done", created, failed, skipped, total: allUnmapped.length });
+    } catch (err: any) {
+      send({ type: "error", message: err.message });
+    }
+
+    res.end();
+  });
+
   app.post("/api/mappings/export-refnets", async (req, res) => {
     try {
       const { providers, productNames } = req.body;

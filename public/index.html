@@ -481,6 +481,7 @@
           <button class="btn" id="btn-clear-cache" style="background:#e74c3c;font-size:13px;padding:10px 20px" title="Limpar cache e recarregar">Limpar Cache</button>
           <button class="btn" id="btn-auto-match-all" style="background:var(--primary);font-size:13px;padding:10px 20px" disabled>Auto-Match</button>
           <button class="btn" id="btn-confirm-all-auto" style="background:#27ae60;font-size:13px;padding:10px 20px;display:none">Confirmar Todos</button>
+          <button class="btn" id="btn-bulk-create" style="background:#8e44ad;font-size:13px;padding:10px 20px" disabled>Criar Todas no Koter</button>
           <button class="btn" id="btn-export-mapped" style="background:var(--accent);font-size:13px;padding:10px 20px" disabled>Exportar</button>
           <span id="map-stats" style="margin-left:auto;font-size:13px;color:var(--text-light)"></span>
         </div>
@@ -1136,6 +1137,8 @@
         // Enable/disable buttons
         document.getElementById('btn-auto-match-all').disabled = stats.total === 0;
         document.getElementById('btn-export-mapped').disabled = stats.mapped === 0;
+        document.getElementById('btn-bulk-create').disabled = stats.pending === 0;
+        document.getElementById('btn-bulk-create').textContent = stats.pending > 0 ? `Criar Todas no Koter (${stats.pending})` : 'Criar Todas no Koter';
 
         if (data.total === 0 && !search && !status) {
           container.innerHTML = `<div class="form-card" style="text-align:center;padding:48px">
@@ -1472,6 +1475,64 @@
         await loadMapStates();
         await loadMapProviders();
       } catch (err) { alert('Erro: ' + err.message); }
+    });
+
+    // ─── Bulk create all unmapped in Koter ────────────────────
+    document.getElementById('btn-bulk-create').addEventListener('click', () => {
+      const btn = document.getElementById('btn-bulk-create');
+      const estado = document.getElementById('map-estado').value;
+      const tipoRede = document.getElementById('map-tipo-rede').value;
+
+      const pendingCount = btn.textContent.match(/\((\d+)\)/);
+      const count = pendingCount ? pendingCount[1] : '?';
+      if (!confirm(`Criar ${count} redes não mapeadas no Koter?\n\nIsso vai criar cada rede com o mesmo nome e cidade da Amil.`)) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Criando...';
+
+      const progWrap = document.getElementById('map-progress-wrap');
+      const progText = document.getElementById('map-progress-text');
+      const progPct = document.getElementById('map-progress-pct');
+      const progFill = document.getElementById('map-progress-fill');
+      progWrap.style.display = 'block';
+      progFill.style.width = '0%';
+
+      const params = new URLSearchParams();
+      if (estado) params.set('estado', estado);
+      if (tipoRede) params.set('tipo_rede', tipoRede);
+
+      const es = new EventSource('/api/mappings/bulk-create?' + params);
+      es.onmessage = (ev) => {
+        const d = JSON.parse(ev.data);
+        if (d.type === 'start') {
+          progText.textContent = `Criando 0/${d.total}...`;
+        } else if (d.type === 'progress') {
+          const pct = Math.round((d.done / d.total) * 100);
+          progFill.style.width = pct + '%';
+          progPct.textContent = pct + '%';
+          const statusIcon = d.status === 'created' ? '✓' : d.status === 'skipped' ? '⊘' : '✗';
+          progText.textContent = `${statusIcon} ${d.current} — ${d.created} criados, ${d.skipped} ignorados, ${d.failed} erros (${d.done}/${d.total})`;
+        } else if (d.type === 'done') {
+          progText.textContent = `Concluído! ${d.created} criados, ${d.skipped} ignorados, ${d.failed} erros.`;
+          progFill.style.width = '100%';
+          setTimeout(() => { progWrap.style.display = 'none'; }, 5000);
+          btn.disabled = false;
+          btn.textContent = 'Criar Todas no Koter';
+          loadMapProviders();
+          es.close();
+        } else if (d.type === 'error') {
+          progText.textContent = 'Erro: ' + d.message;
+          btn.disabled = false;
+          btn.textContent = 'Criar Todas no Koter';
+          es.close();
+        }
+      };
+      es.onerror = () => {
+        progText.textContent = 'Conexão perdida. Tente novamente.';
+        btn.disabled = false;
+        btn.textContent = 'Criar Todas no Koter';
+        es.close();
+      };
     });
 
     // ─── Confirm all auto-matches ────────────────────────────

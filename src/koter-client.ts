@@ -135,7 +135,7 @@ export async function getKoterStates(): Promise<Array<{ id: string; name: string
 export async function createKoterRefnet(
   name: string,
   cityId: string,
-  userId = process.env.KOTER_USER_ID || ""
+  userId = process.env.KOTER_USER_ID || "d2i4sdzg8nh7vy2egv4rjers"
 ): Promise<{ id: string; name: string }> {
   const result = await callKoterTool("create_referenced_network", { userId, name, cityId });
   const text = (result.content as Array<{ type: string; text: string }>)
@@ -143,8 +143,35 @@ export async function createKoterRefnet(
     .map((c) => c.text)
     .join("");
 
+  console.log("[Koter Create] Raw response:", text.substring(0, 500));
+
+  // Try multiple JSON extraction strategies
+  // 1. Try to find a JSON object with an "id" field
+  const allJsonMatches = text.match(/\{[^{}]*"id"[^{}]*\}/g);
+  if (allJsonMatches) {
+    for (const jsonStr of allJsonMatches) {
+      try {
+        const data = JSON.parse(jsonStr);
+        if (data.id) return { id: data.id, name: data.name || name };
+      } catch {}
+    }
+  }
+
+  // 2. Try the largest JSON object
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not parse create_referenced_network response");
-  const data = JSON.parse(jsonMatch[0]);
-  return { id: data.id || data.refnet?.id, name: data.name || data.refnet?.name || name };
+  if (jsonMatch) {
+    try {
+      const data = JSON.parse(jsonMatch[0]);
+      const id = data.id || data.refnet?.id || data.data?.id;
+      if (id) return { id, name: data.name || data.refnet?.name || data.data?.name || name };
+    } catch {}
+  }
+
+  // 3. Try to extract ID from text patterns like "id: abc123" or "ID: abc123"
+  const idMatch = text.match(/["']?id["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]{10,})["']?/i);
+  if (idMatch) {
+    return { id: idMatch[1], name };
+  }
+
+  throw new Error("Could not parse create_referenced_network response: " + text.substring(0, 200));
 }
