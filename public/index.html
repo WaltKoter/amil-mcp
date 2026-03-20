@@ -598,12 +598,25 @@
 
     // ─── API helpers ───────────────────────────────────────────────────────
     const api = {
-      get: (url) => fetch(url).then(r => r.json()),
+      get: (url) => fetch(url).then(async r => {
+        const text = await r.text();
+        try { return JSON.parse(text); } catch { throw new Error(text.substring(0, 200)); }
+      }),
       post: (url, body) => fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-      }).then(r => r.json()),
+      }).then(async r => {
+        const text = await r.text();
+        try {
+          const json = JSON.parse(text);
+          if (!r.ok && json.error) throw new Error(json.error);
+          return json;
+        } catch (e) {
+          if (e.message && !text.startsWith('<')) throw e;
+          throw new Error(`Server error (${r.status}): ${text.substring(0, 200)}`);
+        }
+      }),
     };
 
     function setOptions(selectId, items, valueFn, labelFn, placeholder) {

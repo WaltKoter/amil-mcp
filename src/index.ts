@@ -728,9 +728,14 @@ async function main() {
         planos,
       });
     } catch (err: any) {
-      console.error("[Super Route] Erro:", err.message);
+      console.error("[Super Route] Erro:", err.message, err.stack);
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // Also support GET for easier testing
+  app.get("/api/super-route/test", (_req, res) => {
+    res.json({ status: "ok", endpoint: "POST /api/super-route" });
   });
 
   // ─── MCP Endpoint (session-aware) ─────────────────────────────────────────
