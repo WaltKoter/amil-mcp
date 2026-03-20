@@ -13,6 +13,16 @@ import {
   ALL_LINHAS,
 } from "./amil-client.js";
 import { fetchPriceTablePdf, fetchNetworkPdf } from "./pdf-scraper.js";
+import {
+  getAllMappings,
+  upsertMapping,
+  deleteMapping,
+  searchKoterRefnets,
+  importKoterRefnets,
+  getKoterRefnetStats,
+  autoMatchProviders,
+  exportForKoter,
+} from "./mapping-store.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +138,103 @@ async function main() {
       res.send(pdfBuffer);
     } catch (err: any) {
       console.error("[PDF] Erro ao gerar PDF de rede:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Mapping endpoints (Amil ↔ Koter refnets) ──────────────────────────
+
+  app.get("/api/mappings", (req, res) => {
+    const estado = req.query.estado as string | undefined;
+    res.json(getAllMappings(estado));
+  });
+
+  app.post("/api/mappings", (req, res) => {
+    try {
+      const { amilNome, amilCidade, amilEstado, koterRefnetId, koterRefnetName } = req.body;
+      if (!amilNome || !amilCidade || !koterRefnetId) {
+        res.status(400).json({ error: "amilNome, amilCidade e koterRefnetId são obrigatórios" });
+        return;
+      }
+      const mapping = upsertMapping({
+        amilNome,
+        amilCidade,
+        amilEstado: amilEstado || "",
+        koterRefnetId,
+        koterRefnetName: koterRefnetName || "",
+        createdAt: "",
+      });
+      res.json(mapping);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/mappings", (req, res) => {
+    const { nome, cidade } = req.query as { nome: string; cidade: string };
+    if (!nome || !cidade) {
+      res.status(400).json({ error: "nome e cidade são obrigatórios" });
+      return;
+    }
+    const ok = deleteMapping(nome, cidade);
+    res.json({ deleted: ok });
+  });
+
+  app.get("/api/koter-refnets/search", (req, res) => {
+    const { q, estado, cidade } = req.query as {
+      q: string;
+      estado?: string;
+      cidade?: string;
+    };
+    if (!q) {
+      res.status(400).json({ error: "Parâmetro 'q' é obrigatório" });
+      return;
+    }
+    res.json(searchKoterRefnets(q, estado, cidade));
+  });
+
+  app.get("/api/koter-refnets/stats", (_req, res) => {
+    res.json(getKoterRefnetStats());
+  });
+
+  app.post("/api/koter-refnets/import", (req, res) => {
+    try {
+      const { refnets } = req.body;
+      if (!Array.isArray(refnets)) {
+        res.status(400).json({ error: "Body deve conter { refnets: [...] }" });
+        return;
+      }
+      const added = importKoterRefnets(refnets);
+      res.json({ added, total: getKoterRefnetStats().total });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mappings/auto-match", (req, res) => {
+    try {
+      const { providers, threshold } = req.body;
+      if (!Array.isArray(providers)) {
+        res.status(400).json({ error: "Body deve conter { providers: [...] }" });
+        return;
+      }
+      const results = autoMatchProviders(providers, threshold || 0.5);
+      res.json(results);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/mappings/export", (req, res) => {
+    try {
+      const { providers } = req.body;
+      if (!Array.isArray(providers)) {
+        res.status(400).json({ error: "Body deve conter { providers: [...] }" });
+        return;
+      }
+      const result = exportForKoter(providers);
+      res.json(result);
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

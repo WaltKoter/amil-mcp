@@ -315,6 +315,30 @@
       border-top: 1px solid var(--border);
     }
 
+    .mapping-row { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .mapping-row:hover { background:#f8f8fc; }
+    .mapping-row .provider-info { flex:1; min-width:200px; }
+    .mapping-row .provider-info strong { font-size:14px; display:block; }
+    .mapping-row .provider-info small { color:var(--text-light); font-size:12px; }
+    .mapping-row .match-area { flex:1; min-width:280px; display:flex; gap:8px; align-items:center; }
+    .mapping-row .match-area input { flex:1; padding:8px 10px; border:1.5px solid var(--border); border-radius:6px; font-size:13px; background-image:none; padding-right:10px; }
+    .mapping-row .match-area .search-results { position:absolute; top:100%; left:0; right:0; background:white; border:1px solid var(--border); border-radius:0 0 8px 8px; max-height:200px; overflow-y:auto; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.15); }
+    .mapping-row .match-area .search-results div { padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #f0f0f0; }
+    .mapping-row .match-area .search-results div:hover { background:#f0f0ff; }
+    .mapping-row .match-area .search-results div small { display:block; color:var(--text-light); font-size:11px; }
+    .mapping-row .status-badge { padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap; }
+    .status-mapped { background:#d4edda; color:#155724; }
+    .status-pending { background:#fff3cd; color:#856404; }
+    .status-auto { background:#cce5ff; color:#004085; }
+    .match-search-wrap { position:relative; flex:1; }
+    .btn-sm { padding:6px 12px; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; }
+    .btn-save { background:var(--accent); color:white; }
+    .btn-save:hover { background:var(--accent-hover); }
+    .btn-remove { background:#e74c3c; color:white; }
+    .btn-remove:hover { background:#c0392b; }
+    .btn-confirm-auto { background:#27ae60; color:white; }
+    .btn-confirm-auto:hover { background:#219a52; }
+
     @media (max-width: 768px) {
       .container { padding: 16px; }
       .form-grid { grid-template-columns: 1fr; }
@@ -336,6 +360,7 @@
   <div class="tabs">
     <div class="tab active" data-panel="prices">Tabela de Precos</div>
     <div class="tab" data-panel="network">Rede de Prestadores</div>
+    <div class="tab" data-panel="mapping">Mapeamento Koter</div>
   </div>
 
   <div class="container">
@@ -419,6 +444,66 @@
       </div>
 
       <div id="net-results"></div>
+    </div>
+
+    <!-- ─── MAPPING PANEL ──────────────────────────────────────────── -->
+    <div class="panel" id="panel-mapping">
+      <!-- Cache status -->
+      <div class="form-card" id="cache-status-card">
+        <h2>Cache de Redes Koter</h2>
+        <div id="cache-stats" style="margin-bottom:16px;color:var(--text-light);font-size:14px">
+          Carregando...
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <label class="btn" style="cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:10px 20px">
+            Importar Cache (JSON)
+            <input type="file" accept=".json" id="import-cache-file" style="display:none">
+          </label>
+          <button class="btn" style="background:var(--primary);font-size:13px;padding:10px 20px" id="btn-fetch-koter-refnets">
+            Buscar do Koter (MCP)
+          </button>
+        </div>
+        <div id="cache-import-msg" style="margin-top:8px;font-size:13px;color:var(--text-light)"></div>
+      </div>
+
+      <!-- Import providers from last search -->
+      <div class="form-card">
+        <h2>Prestadores Amil para Mapear</h2>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:12px">
+          Importe prestadores da ultima busca de rede ou carregue um JSON.
+        </p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="btn" id="btn-import-from-network" style="font-size:13px;padding:10px 20px">
+            Importar da Ultima Busca de Rede
+          </button>
+          <label class="btn" style="background:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:10px 20px">
+            Carregar JSON
+            <input type="file" accept=".json" id="import-providers-file" style="display:none">
+          </label>
+        </div>
+        <div id="providers-summary" style="font-size:13px;color:var(--text-light)"></div>
+      </div>
+
+      <!-- Action bar -->
+      <div class="form-card" id="mapping-actions" style="display:none">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn" id="btn-auto-match" style="background:#27ae60;font-size:13px;padding:10px 20px">
+              Auto-Match
+            </button>
+            <button class="btn" id="btn-export-koter" style="background:var(--primary);font-size:13px;padding:10px 20px">
+              Exportar para Koter
+            </button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="mapping-progress" style="font-size:13px;color:var(--text-light)"></span>
+            <input type="text" class="filter-input" id="mapping-filter" placeholder="Filtrar prestadores..." style="width:220px">
+          </div>
+        </div>
+      </div>
+
+      <!-- Mapping table -->
+      <div id="mapping-results"></div>
     </div>
   </div>
 
@@ -983,9 +1068,328 @@
       }
     }
 
+    // ─── MAPPING LOGIC ─────────────────────────────────────────────────────
+
+    let mappingProviders = []; // Array of { nome, cidade, estado, categorias }
+    let mappingState = {};     // key (nome|cidade) -> { koterRefnetId, koterRefnetName, status: 'mapped'|'auto'|'pending' }
+    let searchDebounce = null;
+
+    async function loadCacheStats() {
+      try {
+        const stats = await api.get('/api/koter-refnets/stats');
+        const statesStr = Object.entries(stats.byState || {}).map(([s, c]) => `${s}: ${c}`).join(', ');
+        document.getElementById('cache-stats').innerHTML = stats.total > 0
+          ? `<strong>${stats.total}</strong> redes no cache. ${statesStr ? `<br><small>${statesStr}</small>` : ''}`
+          : 'Nenhuma rede no cache. Importe um JSON ou busque do Koter.';
+      } catch { document.getElementById('cache-stats').textContent = 'Erro ao carregar stats'; }
+    }
+
+    document.getElementById('import-cache-file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const msg = document.getElementById('cache-import-msg');
+      msg.textContent = 'Importando...';
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        // Accept array of { id, name, cityId, cityName, stateName } or fetch from Koter format
+        let refnets = Array.isArray(data) ? data : (data.refnets || data.data || []);
+        if (!refnets.length) { msg.textContent = 'Nenhuma rede encontrada no JSON.'; return; }
+        const resp = await api.post('/api/koter-refnets/import', { refnets });
+        msg.textContent = `Importado! ${resp.added} novas, ${resp.total} total.`;
+        loadCacheStats();
+      } catch (err) { msg.textContent = 'Erro: ' + err.message; }
+      e.target.value = '';
+    });
+
+    document.getElementById('btn-import-from-network').addEventListener('click', () => {
+      if (!lastNetworkData) {
+        alert('Primeiro faca uma busca de rede na aba "Rede de Prestadores".');
+        return;
+      }
+      const providers = [];
+      const seen = new Set();
+      for (const [cat, items] of Object.entries(lastNetworkData)) {
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const key = item.nome + '|' + item.cidade;
+          if (!seen.has(key)) {
+            seen.add(key);
+            const cats = [];
+            for (const [c2, i2] of Object.entries(lastNetworkData)) {
+              if (Array.isArray(i2) && i2.some(x => x.nome === item.nome && x.cidade === item.cidade)) cats.push(c2);
+            }
+            providers.push({ nome: item.nome, cidade: item.cidade, estado: item.estado || lastNetworkParams?.estado || '', categorias: cats });
+          }
+        }
+      }
+      mappingProviders = providers;
+      loadExistingMappings();
+    });
+
+    document.getElementById('import-providers-file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        // Accept the network export format or plain array
+        let items = [];
+        if (data.prestadores) {
+          items = data.prestadores.map(p => ({
+            nome: p.dados_amil?.nome || p.nome,
+            cidade: p.dados_amil?.cidade || p.cidade,
+            estado: p.dados_amil?.regiao_amil || '',
+            categorias: p.dados_amil?.presente_nos_produtos || []
+          }));
+        } else if (Array.isArray(data)) {
+          items = data;
+        } else {
+          // Try the raw network format { category: [items] }
+          const seen = new Set();
+          for (const [cat, arr] of Object.entries(data)) {
+            if (!Array.isArray(arr)) continue;
+            for (const item of arr) {
+              const key = item.nome + '|' + item.cidade;
+              if (!seen.has(key)) { seen.add(key); items.push({ ...item, categorias: [cat] }); }
+            }
+          }
+        }
+        if (!items.length) { alert('Nenhum prestador encontrado no JSON.'); return; }
+        mappingProviders = items;
+        loadExistingMappings();
+      } catch (err) { alert('Erro ao ler JSON: ' + err.message); }
+      e.target.value = '';
+    });
+
+    async function loadExistingMappings() {
+      mappingState = {};
+      try {
+        const existing = await api.get('/api/mappings');
+        for (const m of existing) {
+          const key = (m.amilNome + '|' + m.amilCidade).toUpperCase().trim().replace(/\s+/g, ' ');
+          mappingState[key] = { koterRefnetId: m.koterRefnetId, koterRefnetName: m.koterRefnetName, status: 'mapped' };
+        }
+      } catch {}
+      renderMappingTable();
+    }
+
+    function getMappingKey(nome, cidade) {
+      return (nome + '|' + cidade).toUpperCase().trim().replace(/\s+/g, ' ');
+    }
+
+    function renderMappingTable() {
+      const container = document.getElementById('mapping-results');
+      const actions = document.getElementById('mapping-actions');
+      const summary = document.getElementById('providers-summary');
+
+      if (!mappingProviders.length) {
+        container.innerHTML = '';
+        actions.style.display = 'none';
+        summary.textContent = '';
+        return;
+      }
+
+      actions.style.display = 'block';
+      const mapped = mappingProviders.filter(p => mappingState[getMappingKey(p.nome, p.cidade)]?.status === 'mapped').length;
+      const auto = mappingProviders.filter(p => mappingState[getMappingKey(p.nome, p.cidade)]?.status === 'auto').length;
+      const pending = mappingProviders.length - mapped - auto;
+      summary.innerHTML = `<strong>${mappingProviders.length}</strong> prestadores carregados.`;
+      document.getElementById('mapping-progress').innerHTML =
+        `<span class="status-badge status-mapped">${mapped} mapeados</span> ` +
+        (auto > 0 ? `<span class="status-badge status-auto">${auto} auto</span> ` : '') +
+        `<span class="status-badge status-pending">${pending} pendentes</span>`;
+
+      const filter = (document.getElementById('mapping-filter').value || '').toLowerCase();
+
+      let html = '<div class="results-card"><div class="results-header"><span>Mapeamento Amil → Koter</span><span class="badge">' + mappingProviders.length + ' prestador(es)</span></div>';
+
+      for (let i = 0; i < mappingProviders.length; i++) {
+        const p = mappingProviders[i];
+        if (filter && !(p.nome + ' ' + p.cidade).toLowerCase().includes(filter)) continue;
+
+        const key = getMappingKey(p.nome, p.cidade);
+        const state = mappingState[key];
+        const isMapped = state && (state.status === 'mapped' || state.status === 'auto');
+
+        html += `<div class="mapping-row" data-idx="${i}">`;
+        html += `<div class="provider-info"><strong>${p.nome}</strong><small>${p.cidade}${p.categorias?.length ? ' — ' + p.categorias.join(', ') : ''}</small></div>`;
+        html += `<div class="match-area">`;
+
+        if (isMapped) {
+          html += `<span class="status-badge ${state.status === 'auto' ? 'status-auto' : 'status-mapped'}">${state.status === 'auto' ? 'Auto' : 'Mapeado'}</span>`;
+          html += `<span style="font-size:13px;flex:1">${state.koterRefnetName} <small style="color:var(--text-light)">(${state.koterRefnetId.slice(0,8)}...)</small></span>`;
+          if (state.status === 'auto') {
+            html += `<button class="btn-sm btn-confirm-auto" onclick="confirmAutoMatch(${i})">Confirmar</button>`;
+          }
+          html += `<button class="btn-sm btn-remove" onclick="removeMapping(${i})">Remover</button>`;
+        } else {
+          html += `<div class="match-search-wrap">`;
+          html += `<input type="text" placeholder="Buscar rede Koter..." oninput="searchRefnet(this, ${i})" onfocus="searchRefnet(this, ${i})">`;
+          html += `<div class="search-results" id="search-results-${i}" style="display:none"></div>`;
+          html += `</div>`;
+          html += `<span style="font-size:11px;color:var(--text-light);white-space:nowrap">ou</span>`;
+          html += `<input type="text" placeholder="ID direto" style="width:140px;font-size:12px" id="direct-id-${i}">`;
+          html += `<button class="btn-sm btn-save" onclick="saveDirectId(${i})">Salvar</button>`;
+        }
+
+        html += `</div></div>`;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    function searchRefnet(input, idx) {
+      const q = input.value.trim();
+      const resultsDiv = document.getElementById('search-results-' + idx);
+      if (!q || q.length < 2) { resultsDiv.style.display = 'none'; return; }
+
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(async () => {
+        const p = mappingProviders[idx];
+        try {
+          const params = new URLSearchParams({ q });
+          if (p.estado) params.set('estado', p.estado);
+          const results = await api.get('/api/koter-refnets/search?' + params);
+          if (!results.length) {
+            resultsDiv.innerHTML = '<div style="color:var(--text-light)">Nenhum resultado</div>';
+          } else {
+            resultsDiv.innerHTML = results.map(r =>
+              `<div onclick="selectRefnet(${idx}, '${r.id}', '${r.name.replace(/'/g, "\\'")}')"><strong>${r.name}</strong><small>${r.cityName} - ${r.stateName}</small></div>`
+            ).join('');
+          }
+          resultsDiv.style.display = 'block';
+        } catch { resultsDiv.style.display = 'none'; }
+      }, 300);
+    }
+
+    // Close search dropdowns on click outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.match-search-wrap')) {
+        document.querySelectorAll('.search-results').forEach(d => d.style.display = 'none');
+      }
+    });
+
+    async function selectRefnet(idx, refnetId, refnetName) {
+      const p = mappingProviders[idx];
+      const key = getMappingKey(p.nome, p.cidade);
+      await api.post('/api/mappings', {
+        amilNome: p.nome,
+        amilCidade: p.cidade,
+        amilEstado: p.estado || '',
+        koterRefnetId: refnetId,
+        koterRefnetName: refnetName,
+      });
+      mappingState[key] = { koterRefnetId: refnetId, koterRefnetName: refnetName, status: 'mapped' };
+      renderMappingTable();
+    }
+
+    async function saveDirectId(idx) {
+      const input = document.getElementById('direct-id-' + idx);
+      const refnetId = input.value.trim();
+      if (!refnetId) { alert('Informe um ID'); return; }
+      const p = mappingProviders[idx];
+      const key = getMappingKey(p.nome, p.cidade);
+      await api.post('/api/mappings', {
+        amilNome: p.nome,
+        amilCidade: p.cidade,
+        amilEstado: p.estado || '',
+        koterRefnetId: refnetId,
+        koterRefnetName: '(ID direto)',
+      });
+      mappingState[key] = { koterRefnetId: refnetId, koterRefnetName: '(ID direto)', status: 'mapped' };
+      renderMappingTable();
+    }
+
+    async function confirmAutoMatch(idx) {
+      const p = mappingProviders[idx];
+      const key = getMappingKey(p.nome, p.cidade);
+      const state = mappingState[key];
+      if (!state) return;
+      await api.post('/api/mappings', {
+        amilNome: p.nome,
+        amilCidade: p.cidade,
+        amilEstado: p.estado || '',
+        koterRefnetId: state.koterRefnetId,
+        koterRefnetName: state.koterRefnetName,
+      });
+      state.status = 'mapped';
+      renderMappingTable();
+    }
+
+    async function removeMapping(idx) {
+      const p = mappingProviders[idx];
+      const key = getMappingKey(p.nome, p.cidade);
+      await fetch('/api/mappings?nome=' + encodeURIComponent(p.nome) + '&cidade=' + encodeURIComponent(p.cidade), { method: 'DELETE' });
+      delete mappingState[key];
+      renderMappingTable();
+    }
+
+    document.getElementById('btn-auto-match').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-auto-match');
+      btn.textContent = 'Processando...';
+      btn.disabled = true;
+      try {
+        const providers = mappingProviders
+          .filter(p => !mappingState[getMappingKey(p.nome, p.cidade)] || mappingState[getMappingKey(p.nome, p.cidade)].status === 'pending')
+          .map(p => ({ nome: p.nome, cidade: p.cidade, estado: p.estado || '' }));
+
+        if (!providers.length) { alert('Todos ja estao mapeados!'); return; }
+
+        const results = await api.post('/api/mappings/auto-match', { providers, threshold: 0.45 });
+        let matched = 0;
+        for (const r of results) {
+          if (r.bestMatch && r.confidence >= 0.45) {
+            const key = getMappingKey(r.amilNome, r.amilCidade);
+            mappingState[key] = {
+              koterRefnetId: r.bestMatch.id,
+              koterRefnetName: r.bestMatch.name,
+              status: 'auto'
+            };
+            matched++;
+          }
+        }
+        alert(`Auto-match: ${matched} de ${providers.length} prestadores. Revise e confirme os matches.`);
+        renderMappingTable();
+      } catch (err) {
+        alert('Erro no auto-match: ' + err.message);
+      } finally {
+        btn.textContent = 'Auto-Match';
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btn-export-koter').addEventListener('click', async () => {
+      const providers = mappingProviders
+        .filter(p => {
+          const s = mappingState[getMappingKey(p.nome, p.cidade)];
+          return s && s.status === 'mapped';
+        })
+        .map(p => ({ nome: p.nome, cidade: p.cidade }));
+
+      if (!providers.length) { alert('Nenhum prestador mapeado (confirmado). Confirme os auto-matches primeiro.'); return; }
+
+      try {
+        const result = await api.post('/api/mappings/export', { providers });
+        const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'koter-refnets-import.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) { alert('Erro ao exportar: ' + err.message); }
+    });
+
+    document.getElementById('mapping-filter').addEventListener('input', () => renderMappingTable());
+
     // ─── Init ──────────────────────────────────────────────────────────────
     initPriceForm();
     initNetworkForm();
+    loadCacheStats();
   </script>
 </body>
 </html>
