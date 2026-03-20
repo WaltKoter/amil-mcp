@@ -49,6 +49,8 @@ export interface Provider {
   cidade: string;
   modalidades: string;
   modalidades_extra?: string;
+  /** Which sub-category columns this provider accepts (indices into the category's sub-columns) */
+  sub_categorias_aceitas?: number[];
 }
 
 export interface StateInfo {
@@ -239,6 +241,24 @@ export async function getPriceTable(params: PriceTableParams): Promise<PricePlan
 
 // ─── Get Network / Providers ─────────────────────────────────────────────────
 
+/**
+ * Check if a cell value is an X mark (fa-times icon = hospital does NOT accept this sub-category)
+ */
+function isXMark(val: unknown): boolean {
+  if (typeof val !== "string") return false;
+  return val.includes("fa-times");
+}
+
+/**
+ * Check if a cell value is an actual modalidades string (not X mark, not the trailing "0")
+ */
+function isValidModalidade(val: unknown): boolean {
+  if (typeof val !== "string") return false;
+  if (val === "0" || val.trim() === "") return false;
+  if (isXMark(val)) return false;
+  return true;
+}
+
 export async function getProviders(params: NetworkParams): Promise<Record<string, Provider[]>> {
   const body: Record<string, string> = {
     regiao: params.regiao,
@@ -254,14 +274,60 @@ export async function getProviders(params: NetworkParams): Promise<Record<string
   const result: Record<string, Provider[]> = {};
   for (const [categoria, items] of Object.entries(data as Record<string, unknown[][]>)) {
     if (!Array.isArray(items)) continue;
-    result[categoria] = items.map((row) => ({
-      nome: row[0] as string,
-      estado: row[1] as string,
-      regiao: row[2] as string,
-      cidade: row[3] as string,
-      modalidades: row[4] as string,
-      modalidades_extra: row.length > 5 ? (row[5] as string) : undefined,
-    }));
+
+    const providers: Provider[] = [];
+    for (const row of items) {
+      if (!Array.isArray(row) || row.length < 5) continue;
+
+      const nome = row[0] as string;
+      const estado = row[1] as string;
+      const regiao = row[2] as string;
+      const cidade = row[3] as string;
+
+      // Columns 4..N-1 are sub-category modalidades, last column is always "0"
+      // Each sub-column can be either a modalidades string (accepted) or fa-times HTML (rejected)
+      const subCols: unknown[] = [];
+      for (let i = 4; i < row.length; i++) {
+        // The trailing "0" marks end of data
+        if (row[i] === "0" || row[i] === 0) break;
+        subCols.push(row[i]);
+      }
+
+      // If there are no sub-columns, treat as accepted (e.g., simple row format)
+      if (subCols.length === 0) {
+        providers.push({ nome, estado, regiao, cidade, modalidades: "" });
+        continue;
+      }
+
+      // Check which sub-category columns the provider accepts
+      const acceptedIndices: number[] = [];
+      const acceptedMods: string[] = [];
+      for (let i = 0; i < subCols.length; i++) {
+        if (!isXMark(subCols[i])) {
+          acceptedIndices.push(i);
+          if (isValidModalidade(subCols[i])) {
+            acceptedMods.push(subCols[i] as string);
+          }
+        }
+      }
+
+      // If ALL sub-columns are X marks → provider does NOT accept this category at all → skip
+      if (acceptedIndices.length === 0) {
+        continue;
+      }
+
+      providers.push({
+        nome,
+        estado,
+        regiao,
+        cidade,
+        modalidades: acceptedMods[0] || "",
+        modalidades_extra: acceptedMods.length > 1 ? acceptedMods.slice(1).join("; ") : undefined,
+        sub_categorias_aceitas: acceptedIndices,
+      });
+    }
+
+    result[categoria] = providers;
   }
   return result;
 }
