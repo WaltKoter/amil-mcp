@@ -501,15 +501,12 @@ async function main() {
 
   app.post("/api/mappings/export-refnets", async (req, res) => {
     try {
-      const { providers, productNames } = req.body;
+      const { providers } = req.body;
       if (!Array.isArray(providers)) {
         res.status(400).json({ error: "Body deve conter { providers: [...] }" });
         return;
       }
-      const result = await exportRefnetsForKoter(
-        providers,
-        productNames && productNames.length > 0 ? productNames : undefined
-      );
+      const result = await exportRefnetsForKoter(providers);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

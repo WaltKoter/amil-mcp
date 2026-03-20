@@ -791,7 +791,8 @@
       return exportObj;
     }
 
-    function buildNetworkExportJson(data, params) {
+    async function buildNetworkExportJson(data, params) {
+      // Build providers list with categorias for backend
       const allProviders = [];
       for (const [categoria, items] of Object.entries(data)) {
         if (!Array.isArray(items) || !items.length) continue;
@@ -799,69 +800,46 @@
           allProviders.push({
             nome: item.nome,
             cidade: item.cidade,
-            estado_regiao: item.estado,
-            regiao_amil: item.regiao,
-            modalidades: item.modalidades,
-            categoria_plano: categoria
+            categorias: [categoria]
           });
         }
       }
 
-      // Deduplicate by nome+cidade
-      const seen = new Set();
-      const unique = [];
+      // Deduplicate by nome+cidade, merge categorias
+      const seen = new Map();
       for (const p of allProviders) {
         const key = p.nome + '|' + p.cidade;
-        if (!seen.has(key)) {
-          seen.add(key);
-          // Collect all categorias for this provider
-          const cats = allProviders.filter(x => x.nome === p.nome && x.cidade === p.cidade).map(x => x.categoria_plano);
-          unique.push({ ...p, presente_nos_produtos: [...new Set(cats)] });
+        if (seen.has(key)) {
+          const existing = seen.get(key);
+          if (!existing.categorias.includes(p.categorias[0])) {
+            existing.categorias.push(p.categorias[0]);
+          }
+        } else {
+          seen.set(key, { ...p });
         }
       }
 
-      const exportObj = {
-        _instrucoes: [
-          'JSON estruturado para cadastro de redes referenciadas no Koter.',
-          'FLUXO: Para cada prestador:',
-          '1) Buscar se ja existe: fetch_refnets_by_approximate_name_cadastro(name: "NOME").',
-          '2) Se NAO existe: buscar cityId com fetch_cities_by_state_name, depois create_referenced_network.',
-          '3) Vincular ao produto: add_refnet_to_product ou bulk_add_refnets_to_product.',
-          'O campo "presente_nos_produtos" indica em quais categorias (bronze/prata/ouro/platinum) o prestador aparece.',
-          'Deduplicado por nome+cidade (um prestador pode atender multiplos planos).'
-        ],
-        _fonte: {
-          plataforma: 'Kit Corretor Amil',
-          linha: params.linha,
-          regiao: params.regiao,
-          estado: params.estado,
-          tipo_rede: params.tipo_rede || 'Hospitais',
-          data_consulta: new Date().toISOString().split('T')[0]
-        },
-        resumo: {
-          total_registros: allProviders.length,
-          total_unicos: unique.length,
-          por_categoria: Object.fromEntries(
-            Object.entries(data).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])
-          )
-        },
-        prestadores: unique.map(p => ({
-          _koter_create_referenced_network: {
-            userId: 'd2i4sdzg8nh7vy2egv4rjers',
-            name: p.nome,
-            cityId: '(PREENCHER — buscar com fetch_cities_by_state_name para cidade "' + p.cidade + '")'
-          },
-          dados_amil: {
-            nome: p.nome,
-            cidade: p.cidade,
-            regiao_amil: p.regiao_amil,
-            modalidades: p.modalidades,
-            presente_nos_produtos: p.presente_nos_produtos
-          }
-        }))
-      };
+      // Call backend to resolve Koter refnet IDs
+      const result = await api.post('/api/mappings/export-refnets', {
+        providers: [...seen.values()]
+      });
 
-      return exportObj;
+      return result;
+    }
+
+    async function exportKoterRefnets(mode) {
+      if (!lastNetworkData) return alert('Busque a rede primeiro');
+      try {
+        const data = await buildNetworkExportJson(lastNetworkData, lastNetworkParams);
+        if (mode === 'copy') {
+          copyJson(data);
+        } else {
+          const filename = 'amil-rede-' + lastNetworkParams.estado.toLowerCase().replace(/ /g, '-') + '.json';
+          downloadJson(data, filename);
+        }
+      } catch (err) {
+        alert('Erro ao exportar: ' + err.message);
+      }
     }
 
     function downloadJson(data, filename) {
@@ -1035,8 +1013,8 @@
 
         let html = `<div class="export-bar" style="background:var(--card);border-radius:var(--radius);margin-bottom:16px;justify-content:flex-start">
           <button class="btn-export network-pdf-btn" style="background:#c0392b" onclick="downloadNetworkPDF()">&#128196; Baixar PDF Amil</button>
-          <button class="btn-export" onclick="copyJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams))">&#128203; Copiar JSON Koter (Redes)</button>
-          <button class="btn-export" onclick="downloadJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams), 'amil-rede-'+lastNetworkParams.estado.toLowerCase().replace(/ /g,'-')+'.json')">&#11015; Exportar JSON Koter (Redes)</button>
+          <button class="btn-export" onclick="exportKoterRefnets('copy')">&#128203; Copiar JSON Koter (Redes)</button>
+          <button class="btn-export" onclick="exportKoterRefnets('download')">&#11015; Exportar JSON Koter (Redes)</button>
         </div>`;
         for (const [cat, items] of categories) {
           html += `

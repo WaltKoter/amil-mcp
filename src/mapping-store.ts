@@ -473,51 +473,34 @@ function computeConfidence(amilNome: string, amilCidade: string, koterRefnet: Ko
 
 // ─── Export for Koter ────────────────────────────────────────────────────────
 
-export interface KoterRefnetExport {
-  externalApiProductIds: string[];
-  productNames: string[];
-  refnetIds: string[];
+export interface KoterRefnetItem {
+  refnetId: string;
 }
 
-export interface GroupedRefnetExport {
-  [categoria: string]: KoterRefnetExport;
-}
-
+/**
+ * Export refnets in Koter format: [{ refnetId: "xxx" }, ...]
+ * Groups by categoria so each product gets only its accepted networks.
+ */
 export async function exportRefnetsForKoter(
   providers: Array<{ nome: string; cidade: string; categorias?: string[]; linhas?: string[] }>,
-  productNames?: string[]
-): Promise<GroupedRefnetExport> {
-  // Group providers by their categorias (Amil product names)
+): Promise<Record<string, KoterRefnetItem[]>> {
+  // Group koterRefnetIds by categoria
   const groups: Record<string, Set<string>> = {};
 
   for (const p of providers) {
     const mapping = await getMappingByKey(p.nome, p.cidade);
     if (!mapping) continue;
 
-    const cats = p.categorias && p.categorias.length > 0 ? p.categorias : ["Sem Categoria"];
+    const cats = p.categorias && p.categorias.length > 0 ? p.categorias : ["geral"];
     for (const cat of cats) {
       if (!groups[cat]) groups[cat] = new Set();
       groups[cat].add(mapping.koterRefnetId);
     }
   }
 
-  // If manual productNames provided, merge all refnets into one group per name
-  if (productNames && productNames.length > 0) {
-    const allRefnets = new Set<string>();
-    for (const set of Object.values(groups)) {
-      for (const id of set) allRefnets.add(id);
-    }
-    const result: GroupedRefnetExport = {};
-    for (const name of productNames) {
-      result[name] = { externalApiProductIds: [], productNames: [name], refnetIds: [...allRefnets] };
-    }
-    return result;
-  }
-
-  // Auto-grouped by Amil category
-  const result: GroupedRefnetExport = {};
+  const result: Record<string, KoterRefnetItem[]> = {};
   for (const [cat, ids] of Object.entries(groups)) {
-    result[cat] = { externalApiProductIds: [], productNames: [cat], refnetIds: [...ids] };
+    result[cat] = [...ids].map(id => ({ refnetId: id }));
   }
   return result;
 }
