@@ -128,3 +128,20 @@ export async function searchKoterRefnets(
 export async function getKoterStates(): Promise<Array<{ id: string; name: string; abbreviation: string }>> {
   return getStates();
 }
+
+export async function createKoterRefnet(
+  name: string,
+  cityId: string,
+  userId = "d2i4sdzg8nh7vy2egv4rjers"
+): Promise<{ id: string; name: string }> {
+  const result = await callKoterTool("create_referenced_network", { userId, name, cityId });
+  const text = (result.content as Array<{ type: string; text: string }>)
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
+    .join("");
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Could not parse create_referenced_network response");
+  const data = JSON.parse(jsonMatch[0]);
+  return { id: data.id || data.refnet?.id, name: data.name || data.refnet?.name || name };
+}

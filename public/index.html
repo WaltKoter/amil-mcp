@@ -1203,6 +1203,7 @@
           html += `<input type="text" placeholder="Buscar rede Koter..." oninput="mapSearch(this, ${i})" onfocus="mapSearch(this, ${i})">`;
           html += `<div class="search-results" id="map-sr-${i}" style="display:none"></div>`;
           html += `</div>`;
+          html += `<button class="btn-sm" style="background:#8e44ad;color:white;white-space:nowrap" onclick="mapCreateInKoter(${i})" title="Criar rede no Koter com mesmo nome/cidade">+ Criar</button>`;
         }
 
         html += `</div></div>`;
@@ -1279,6 +1280,28 @@
       delete mapAutoState[key];
       updateConfirmAllBtn();
       loadMapProviders();
+    }
+
+    // ─── Create in Koter (1-click) ─────────────────────────
+    async function mapCreateInKoter(idx) {
+      const p = mapCurrentProviders[idx];
+      if (!confirm(`Criar "${p.nome}" (${p.cidade}, ${p.estado}) no Koter?`)) return;
+
+      const btn = event.target;
+      btn.disabled = true;
+      btn.textContent = 'Criando...';
+
+      try {
+        const result = await api.post('/api/mappings/create-and-map', {
+          amilNome: p.nome, amilCidade: p.cidade, amilEstado: p.estado,
+        });
+        if (result.error) throw new Error(result.error);
+        await loadMapProviders();
+      } catch (err) {
+        alert('Erro ao criar: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = '+ Criar';
+      }
     }
 
     // ─── Fetch all from Amil (SSE) ─────────────────────────

@@ -33,6 +33,7 @@ import {
 } from "./mapping-store.js";
 import {
   searchKoterRefnets as searchKoterRefnetsLive,
+  createKoterRefnet,
 } from "./koter-client.js";
 import { getComercializacaoByState } from "./manual-vendas.js";
 import { getKoterCitiesByState } from "./koter-cities.js";
@@ -245,6 +246,46 @@ async function main() {
       res.json(results);
     } catch (err: any) {
       console.error("[Auto-match] Erro:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Create refnet in Koter and auto-map
+  app.post("/api/mappings/create-and-map", async (req, res) => {
+    try {
+      const { amilNome, amilCidade, amilEstado } = req.body;
+      if (!amilNome || !amilCidade || !amilEstado) {
+        res.status(400).json({ error: "amilNome, amilCidade e amilEstado são obrigatórios" });
+        return;
+      }
+
+      // Resolve city to Koter cityId
+      const koterCities = await getKoterCitiesByState(amilEstado);
+      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+      const amilCityNorm = normCity(amilCidade);
+      const match = koterCities.find((c) => normCity(c.name) === amilCityNorm);
+
+      if (!match) {
+        res.status(404).json({ error: `Cidade "${amilCidade}" não encontrada no Koter para o estado "${amilEstado}"` });
+        return;
+      }
+
+      // Create refnet in Koter
+      const created = await createKoterRefnet(amilNome, match.id);
+
+      // Auto-map
+      await upsertMapping({
+        amilNome,
+        amilCidade,
+        amilEstado,
+        koterRefnetId: created.id,
+        koterRefnetName: created.name,
+        createdAt: "",
+      });
+
+      res.json({ created: true, refnetId: created.id, refnetName: created.name, cityId: match.id, cityName: match.name });
+    } catch (err: any) {
+      console.error("[Create+Map] Erro:", err.message);
       res.status(500).json({ error: err.message });
     }
   });
