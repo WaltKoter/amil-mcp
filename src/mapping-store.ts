@@ -172,40 +172,38 @@ export async function getProviderStats(filters?: { estado?: string; tipoRede?: s
 
 export async function getRefnetIdsByCategoria(
   categoria: string,
+  estado?: string,
   planName?: string,
   tipoRede = "Hospitais"
 ): Promise<string[]> {
-  console.log(`[RefnetByCategoria] Searching for categoria="${categoria}" planName="${planName}" tipoRede="${tipoRede}"`);
-
-  // First, log what categories actually exist in DB for debugging
-  const sampleCats = await query(
-    `SELECT DISTINCT p.categorias FROM all_providers p
-     INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
-     WHERE p.tipo_rede = $1 LIMIT 5`,
-    [tipoRede]
-  );
-  if (sampleCats.rows.length > 0) {
-    console.log(`[RefnetByCategoria] Sample categorias in DB:`, sampleCats.rows.map((r: any) => r.categorias));
-  } else {
-    console.log(`[RefnetByCategoria] No mapped providers found in DB for tipoRede=${tipoRede}`);
+  // Build estado filter - match providers from this state only
+  // Handle aliases: "INTERIOR SP - 1" should match all SP providers, etc.
+  let estadoPattern = "";
+  if (estado) {
+    const up = estado.toUpperCase();
+    if (up.includes("SP") || up.includes("PAULO")) estadoPattern = "%SP%";
+    else if (up.includes("RJ") || up.includes("JANEIRO")) estadoPattern = "%RJ%";
+    else if (up.includes("ES") || up.includes("ESPÍRITO") || up.includes("ESPIRITO")) estadoPattern = "%ES%";
+    else estadoPattern = `%${up}%`;
   }
+  const estadoFilter = estado ? `AND UPPER(p.estado) ILIKE $3` : "";
+  const baseParams = (catPattern: string) =>
+    estado ? [catPattern, tipoRede, estadoPattern] : [catPattern, tipoRede];
 
-  // Use ILIKE for case-insensitive matching and try multiple strategies
-  // 1. Exact category match (case-insensitive)
+  // 1. Exact category match (case-insensitive), filtered by state
   let result = await query(
     `SELECT DISTINCT m.koter_refnet_id
      FROM all_providers p
      INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
-     WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
-    [`%${categoria.toLowerCase()}%`, tipoRede]
+     WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2 ${estadoFilter}`,
+    baseParams(`%${categoria.toLowerCase()}%`)
   );
 
   if (result.rows.length > 0) {
     return result.rows.map((r: any) => r.koter_refnet_id);
   }
 
-  // 2. Try with plan name parts - extract key words from plan name
-  // e.g. "AMIL PRATA QC" -> try matching "PRATA"
+  // 2. Try with plan name keywords
   if (planName) {
     const keywords = planName.toUpperCase()
       .replace(/^AMIL\s+/i, "")
@@ -216,8 +214,8 @@ export async function getRefnetIdsByCategoria(
         `SELECT DISTINCT m.koter_refnet_id
          FROM all_providers p
          INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
-         WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
-        [`%${keywords.toLowerCase()}%`, tipoRede]
+         WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2 ${estadoFilter}`,
+        baseParams(`%${keywords.toLowerCase()}%`)
       );
       if (result.rows.length > 0) {
         return result.rows.map((r: any) => r.koter_refnet_id);
@@ -225,15 +223,15 @@ export async function getRefnetIdsByCategoria(
     }
   }
 
-  // 3. Try matching any of the individual words from categoria
+  // 3. Try individual words from categoria
   const words = categoria.split(/\s+/).filter(w => w.length >= 3);
   for (const word of words) {
     result = await query(
       `SELECT DISTINCT m.koter_refnet_id
        FROM all_providers p
        INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
-       WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
-      [`%${word.toLowerCase()}%`, tipoRede]
+       WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2 ${estadoFilter}`,
+      baseParams(`%${word.toLowerCase()}%`)
     );
     if (result.rows.length > 0) {
       return result.rows.map((r: any) => r.koter_refnet_id);

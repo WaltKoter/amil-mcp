@@ -513,7 +513,7 @@ export function registerTools(server: McpServer) {
 
       const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
       const refnetMap: Record<string, string[]> = {};
-      await Promise.all(catKeys.map(async ([cat, planName]) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat, planName); }));
+      await Promise.all(catKeys.map(async ([cat, planName]) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat, estado, planName); }));
 
       const nacionalCityIds = comercializacao.produtos_nacionais.filter((c: any) => c.koterCityId).map((c: any) => c.koterCityId);
       const normMatch = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();

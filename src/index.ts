@@ -647,7 +647,7 @@ async function main() {
       const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
       const refnetMap: Record<string, string[]> = {};
       await Promise.all(catKeys.map(async ([cat, planName]) => {
-        refnetMap[cat] = await getRefnetIdsByCategoria(cat, planName);
+        refnetMap[cat] = await getRefnetIdsByCategoria(cat, estado, planName);
       }));
 
       // 3. Pre-compute nacional city IDs (filtered to non-null)
