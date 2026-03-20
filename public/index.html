@@ -467,11 +467,7 @@
             <span style="color:var(--border)">|</span>
             <span id="mapping-progress" style="font-size:13px"></span>
             <span style="color:var(--border)">|</span>
-            <span id="mapping-cache-info" style="font-size:12px;color:var(--text-light)"></span>
-            <label style="cursor:pointer;font-size:12px;color:var(--accent);font-weight:600;text-decoration:underline">
-              Importar redes
-              <input type="file" accept=".json" id="import-cache-file" style="display:none">
-            </label>
+            <span id="mapping-cache-info" style="font-size:12px;color:var(--text-light)">Busca via Koter MCP</span>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <input type="text" class="filter-input" id="mapping-filter" placeholder="Filtrar..." style="width:180px">
@@ -1092,10 +1088,7 @@
           mappingState[key] = { koterRefnetId: m.koterRefnetId, koterRefnetName: m.koterRefnetName, status: 'mapped' };
         }
 
-        // Load cache stats
-        const stats = await api.get('/api/koter-refnets/stats');
-        const cacheInfo = document.getElementById('mapping-cache-info');
-        cacheInfo.textContent = stats.total > 0 ? `${stats.total} redes no DB` : 'DB vazio';
+        // Koter MCP is used directly for search — no local cache needed
 
         // Show search info
         const sp = mappingSearchParams;
@@ -1267,20 +1260,6 @@
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       } catch (err) { alert('Erro: ' + err.message); }
-    });
-
-    document.getElementById('import-cache-file').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        let refnets = Array.isArray(data) ? data : (data.refnets || data.data || []);
-        if (!refnets.length) { alert('Nenhuma rede no JSON.'); return; }
-        const resp = await api.post('/api/koter-refnets/import', { refnets });
-        document.getElementById('mapping-cache-info').textContent = `${resp.total} redes no DB (+${resp.added})`;
-      } catch (err) { alert('Erro: ' + err.message); }
-      e.target.value = '';
     });
 
     document.getElementById('mapping-filter').addEventListener('input', () => renderMappingTable());

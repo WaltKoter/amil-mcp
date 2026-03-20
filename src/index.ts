@@ -18,14 +18,14 @@ import {
   getAllMappings,
   upsertMapping,
   deleteMapping,
-  searchKoterRefnets,
-  importKoterRefnets,
-  getKoterRefnetStats,
   autoMatchProviders,
   exportForKoter,
   saveNetworkResults,
   getLastNetworkResults,
 } from "./mapping-store.js";
+import {
+  searchKoterRefnets as searchKoterRefnetsLive,
+} from "./koter-client.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -210,47 +210,32 @@ async function main() {
     res.json({ deleted: ok });
   });
 
-  app.get("/api/koter-refnets/search", (req, res) => {
-    const { q, estado, cidade } = req.query as {
-      q: string;
-      estado?: string;
-      cidade?: string;
-    };
+  app.get("/api/koter-refnets/search", async (req, res) => {
+    const { q, estado } = req.query as { q: string; estado?: string };
     if (!q) {
       res.status(400).json({ error: "Parâmetro 'q' é obrigatório" });
       return;
     }
-    res.json(searchKoterRefnets(q, estado, cidade));
-  });
-
-  app.get("/api/koter-refnets/stats", (_req, res) => {
-    res.json(getKoterRefnetStats());
-  });
-
-  app.post("/api/koter-refnets/import", (req, res) => {
     try {
-      const { refnets } = req.body;
-      if (!Array.isArray(refnets)) {
-        res.status(400).json({ error: "Body deve conter { refnets: [...] }" });
-        return;
-      }
-      const added = importKoterRefnets(refnets);
-      res.json({ added, total: getKoterRefnetStats().total });
+      const result = await searchKoterRefnetsLive(q, estado);
+      res.json(result.refnets);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[Koter MCP] Erro na busca:", err.message);
+      res.status(500).json({ error: "Erro ao buscar no Koter: " + err.message });
     }
   });
 
-  app.post("/api/mappings/auto-match", (req, res) => {
+  app.post("/api/mappings/auto-match", async (req, res) => {
     try {
-      const { providers, threshold } = req.body;
+      const { providers } = req.body;
       if (!Array.isArray(providers)) {
         res.status(400).json({ error: "Body deve conter { providers: [...] }" });
         return;
       }
-      const results = autoMatchProviders(providers, threshold || 0.5);
+      const results = await autoMatchProviders(providers);
       res.json(results);
     } catch (err: any) {
+      console.error("[Auto-match] Erro:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

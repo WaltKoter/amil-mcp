@@ -1,4 +1,5 @@
 import { getDb } from "./db.js";
+import { searchKoterRefnets as searchKoterLive, KoterRefnetResult } from "./koter-client.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -11,14 +12,6 @@ export interface RefnetMapping {
   createdAt: string;
 }
 
-export interface KoterRefnet {
-  id: string;
-  name: string;
-  cityId: string;
-  cityName: string;
-  stateName: string;
-}
-
 export interface NetworkProvider {
   nome: string;
   cidade: string;
@@ -29,9 +22,8 @@ export interface NetworkProvider {
 export interface AutoMatchResult {
   amilNome: string;
   amilCidade: string;
-  bestMatch: KoterRefnet | null;
+  bestMatch: KoterRefnetResult | null;
   confidence: number;
-  alternatives: Array<{ refnet: KoterRefnet; confidence: number }>;
 }
 
 // ─── Mappings CRUD ──────────────────────────────────────────────────────────
@@ -91,115 +83,6 @@ export function deleteMapping(nome: string, cidade: string): boolean {
   return result.changes > 0;
 }
 
-// ─── Koter Refnets ─────────────────────────────────────────────────────────
-
-export function searchKoterRefnets(
-  query: string,
-  stateName?: string,
-  cityName?: string,
-  limit = 20
-): KoterRefnet[] {
-  const db = getDb();
-  const q = query.toUpperCase().trim().replace(/\s+/g, " ");
-  if (!q) return [];
-
-  let sql = `SELECT id, name, city_id as cityId, city_name as cityName, state_name as stateName FROM koter_refnets WHERE 1=1`;
-  const params: any[] = [];
-
-  if (stateName) {
-    // Amil: "RIO DE JANEIRO" (upper, no accents), Koter: "Rio de Janeiro"
-    // Resolve by checking distinct states in DB and matching with accent-stripped comparison
-    const allStates = db
-      .prepare(`SELECT DISTINCT state_name FROM koter_refnets`)
-      .all() as Array<{ state_name: string }>;
-    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-    const inputNorm = norm(stateName);
-    const matchingStates = allStates.filter((s) => norm(s.state_name) === inputNorm).map((s) => s.state_name);
-    if (matchingStates.length > 0) {
-      sql += ` AND state_name IN (${matchingStates.map(() => "?").join(",")})`;
-      params.push(...matchingStates);
-    } else {
-      sql += ` AND UPPER(state_name) LIKE ?`;
-      params.push(`%${inputNorm}%`);
-    }
-  }
-  if (cityName) {
-    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-    const inputNorm = norm(cityName);
-    const allCities = db
-      .prepare(`SELECT DISTINCT city_name FROM koter_refnets`)
-      .all() as Array<{ city_name: string }>;
-    const matchingCities = allCities.filter((c) => norm(c.city_name) === inputNorm).map((c) => c.city_name);
-    if (matchingCities.length > 0) {
-      sql += ` AND city_name IN (${matchingCities.map(() => "?").join(",")})`;
-      params.push(...matchingCities);
-    }
-  }
-
-  // Pre-filter with LIKE for performance
-  const tokens = q.split(/\s+/).filter((t) => t.length >= 2);
-  if (tokens.length > 0) {
-    sql += ` AND (` + tokens.map(() => `UPPER(name) LIKE ?`).join(" OR ") + `)`;
-    for (const t of tokens) params.push(`%${t}%`);
-  }
-
-  const candidates = db.prepare(sql).all(...params) as KoterRefnet[];
-
-  // Score in JS for better ranking
-  const scored = candidates.map((r) => {
-    const name = r.name.toUpperCase();
-    let score = 0;
-    if (name === q) score = 100;
-    else if (name.includes(q)) score = 80;
-    else if (q.includes(name)) score = 70;
-    else {
-      const qTokens = q.split(/\s+/);
-      const nTokens = name.split(/\s+/);
-      const matches = qTokens.filter((t) =>
-        nTokens.some((nt) => nt.includes(t) || t.includes(nt))
-      );
-      score = (matches.length / Math.max(qTokens.length, 1)) * 60;
-    }
-    return { refnet: r, score };
-  });
-
-  return scored
-    .filter((s) => s.score > 10)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((s) => s.refnet);
-}
-
-export function importKoterRefnets(refnets: KoterRefnet[]): number {
-  const db = getDb();
-  const upsert = db.prepare(
-    `INSERT INTO koter_refnets (id, name, city_id, city_name, state_name, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(id) DO UPDATE SET name=excluded.name, city_id=excluded.city_id,
-       city_name=excluded.city_name, state_name=excluded.state_name, updated_at=datetime('now')`
-  );
-  const countBefore = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
-  const tx = db.transaction(() => {
-    for (const r of refnets) {
-      upsert.run(r.id, r.name, r.cityId, r.cityName, r.stateName);
-    }
-  });
-  tx();
-  const countAfter = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
-  return countAfter - countBefore;
-}
-
-export function getKoterRefnetStats(): { total: number; byState: Record<string, number> } {
-  const db = getDb();
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
-  const rows = db
-    .prepare(`SELECT state_name as state, COUNT(*) as cnt FROM koter_refnets GROUP BY state_name ORDER BY cnt DESC`)
-    .all() as Array<{ state: string; cnt: number }>;
-  const byState: Record<string, number> = {};
-  for (const r of rows) byState[r.state] = r.cnt;
-  return { total, byState };
-}
-
 // ─── Last Network Results ───────────────────────────────────────────────────
 
 export function saveNetworkResults(
@@ -253,79 +136,77 @@ export function getLastNetworkResults(): {
   return { providers, searchParams };
 }
 
-// ─── Auto-match ─────────────────────────────────────────────────────────────
+// ─── Auto-match (via Koter MCP) ────────────────────────────────────────────
 
-const NOISE_WORDS = [
-  "HOSPITAL", "HOSP", "HOSP.", "CLINICA", "CLÍNICA", "LABORATORIO",
-  "LABORATÓRIO", "LAB", "LAB.", "CENTRO", "INST", "INSTITUTO",
-  "S/A", "SA", "LTDA", "ME", "EIRELI", "EPP", "S.A.", "S.A",
-  "UNIDADE", "FILIAL", "MATRIZ",
-];
-
-function normalizeName(name: string): string {
-  let n = name.toUpperCase().trim();
-  n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  for (const w of NOISE_WORDS) {
-    n = n.replace(new RegExp("\\b" + w.replace(/\./g, "\\.") + "\\b", "g"), "");
-  }
-  return n.replace(/\s+/g, " ").trim();
-}
-
-function similarity(a: string, b: string): number {
-  const na = normalizeName(a);
-  const nb = normalizeName(b);
-  if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return 0.85;
-
-  const tokensA = na.split(/\s+/);
-  const tokensB = nb.split(/\s+/);
-  const matches = tokensA.filter((t) =>
-    tokensB.some((bt) => bt === t || bt.includes(t) || t.includes(bt))
-  );
-  return matches.length / Math.max(tokensA.length, tokensB.length);
-}
-
-export function autoMatchProviders(
-  providers: Array<{ nome: string; cidade: string; estado: string }>,
-  threshold = 0.5
-): AutoMatchResult[] {
-  const db = getDb();
+export async function autoMatchProviders(
+  providers: Array<{ nome: string; cidade: string; estado: string }>
+): Promise<AutoMatchResult[]> {
   const results: AutoMatchResult[] = [];
 
   for (const p of providers) {
     const existing = getMappingByKey(p.nome, p.cidade);
     if (existing) continue;
 
-    // Get candidates from DB filtered by state
-    const stateRefnets = db
-      .prepare(
-        `SELECT id, name, city_id as cityId, city_name as cityName, state_name as stateName
-         FROM koter_refnets WHERE UPPER(state_name) LIKE ?`
-      )
-      .all(`%${p.estado.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").substring(0, 10)}%`) as KoterRefnet[];
+    try {
+      // Search Koter MCP by provider name, filtered by state
+      const { refnets } = await searchKoterLive(p.nome, p.estado, 1, 5);
 
-    const scored = stateRefnets.map((r) => {
-      let conf = similarity(p.nome, r.name);
-      const cityMatch =
-        r.cityName.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") ===
-        p.cidade.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (cityMatch) conf = Math.min(1, conf + 0.15);
-      return { refnet: r, confidence: conf };
-    });
+      if (refnets.length > 0) {
+        // Score best match by similarity
+        const best = refnets[0]; // MCP already returns ranked by relevance
+        const confidence = computeConfidence(p.nome, p.cidade, best);
 
-    scored.sort((a, b) => b.confidence - a.confidence);
-    const top = scored.filter((s) => s.confidence >= threshold).slice(0, 5);
-
-    results.push({
-      amilNome: p.nome,
-      amilCidade: p.cidade,
-      bestMatch: top.length > 0 ? top[0].refnet : null,
-      confidence: top.length > 0 ? top[0].confidence : 0,
-      alternatives: top,
-    });
+        results.push({
+          amilNome: p.nome,
+          amilCidade: p.cidade,
+          bestMatch: confidence >= 0.4 ? best : null,
+          confidence,
+        });
+      } else {
+        results.push({ amilNome: p.nome, amilCidade: p.cidade, bestMatch: null, confidence: 0 });
+      }
+    } catch {
+      results.push({ amilNome: p.nome, amilCidade: p.cidade, bestMatch: null, confidence: 0 });
+    }
   }
 
   return results;
+}
+
+function normalizeName(name: string): string {
+  let n = name.toUpperCase().trim();
+  n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const noise = ["HOSPITAL", "HOSP", "CLINICA", "LABORATORIO", "LAB", "CENTRO",
+    "INSTITUTO", "S/A", "SA", "LTDA", "ME", "EIRELI", "AMIL", "AMIL -", "AMIL-"];
+  for (const w of noise) {
+    n = n.replace(new RegExp("\\b" + w.replace(/[/.\\-]/g, "\\.?") + "\\b", "g"), "");
+  }
+  return n.replace(/\s+/g, " ").trim();
+}
+
+function computeConfidence(amilNome: string, amilCidade: string, koterRefnet: KoterRefnetResult): number {
+  const na = normalizeName(amilNome);
+  const nb = normalizeName(koterRefnet.name);
+
+  let score = 0;
+  if (na === nb) score = 1;
+  else if (na.includes(nb) || nb.includes(na)) score = 0.85;
+  else {
+    const tokensA = na.split(/\s+/);
+    const tokensB = nb.split(/\s+/);
+    const matches = tokensA.filter((t) =>
+      tokensB.some((bt) => bt === t || bt.includes(t) || t.includes(bt))
+    );
+    score = matches.length / Math.max(tokensA.length, tokensB.length);
+  }
+
+  // Boost if city matches
+  const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  if (normCity(amilCidade) === normCity(koterRefnet.cityName || "")) {
+    score = Math.min(1, score + 0.15);
+  }
+
+  return score;
 }
 
 // ─── Export ─────────────────────────────────────────────────────────────────
