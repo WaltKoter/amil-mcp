@@ -134,7 +134,7 @@ export async function getKoterStates(): Promise<Array<{ id: string; name: string
 export async function createKoterRefnet(
   name: string,
   cityId: string,
-  userId = "d2i4sdzg8nh7vy2egv4rjers"
+  userId = process.env.KOTER_USER_ID || ""
 ): Promise<{ id: string; name: string }> {
   const result = await callKoterTool("create_referenced_network", { userId, name, cityId });
   const text = (result.content as Array<{ type: string; text: string }>)
