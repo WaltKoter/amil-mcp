@@ -791,40 +791,23 @@
       return exportObj;
     }
 
-    async function buildNetworkExportJson(data, params) {
-      // Build providers list with categorias for backend
-      const allProviders = [];
-      for (const [categoria, items] of Object.entries(data)) {
+    async function buildNetworkExportJson(data) {
+      // Build unique providers list
+      const seen = new Set();
+      const providers = [];
+      for (const [, items] of Object.entries(data)) {
         if (!Array.isArray(items) || !items.length) continue;
         for (const item of items) {
-          allProviders.push({
-            nome: item.nome,
-            cidade: item.cidade,
-            categorias: [categoria]
-          });
-        }
-      }
-
-      // Deduplicate by nome+cidade, merge categorias
-      const seen = new Map();
-      for (const p of allProviders) {
-        const key = p.nome + '|' + p.cidade;
-        if (seen.has(key)) {
-          const existing = seen.get(key);
-          if (!existing.categorias.includes(p.categorias[0])) {
-            existing.categorias.push(p.categorias[0]);
+          const key = item.nome + '|' + item.cidade;
+          if (!seen.has(key)) {
+            seen.add(key);
+            providers.push({ nome: item.nome, cidade: item.cidade });
           }
-        } else {
-          seen.set(key, { ...p });
         }
       }
 
       // Call backend to resolve Koter refnet IDs
-      const result = await api.post('/api/mappings/export-refnets', {
-        providers: [...seen.values()]
-      });
-
-      return result;
+      return await api.post('/api/mappings/export-refnets', { providers });
     }
 
     async function exportKoterRefnets(mode) {

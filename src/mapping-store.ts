@@ -479,30 +479,20 @@ export interface KoterRefnetItem {
 
 /**
  * Export refnets in Koter format: [{ refnetId: "xxx" }, ...]
- * Groups by categoria so each product gets only its accepted networks.
+ * Flat array, deduplicated.
  */
 export async function exportRefnetsForKoter(
-  providers: Array<{ nome: string; cidade: string; categorias?: string[]; linhas?: string[] }>,
-): Promise<Record<string, KoterRefnetItem[]>> {
-  // Group koterRefnetIds by categoria
-  const groups: Record<string, Set<string>> = {};
+  providers: Array<{ nome: string; cidade: string }>,
+): Promise<KoterRefnetItem[]> {
+  const ids = new Set<string>();
 
   for (const p of providers) {
     const mapping = await getMappingByKey(p.nome, p.cidade);
     if (!mapping) continue;
-
-    const cats = p.categorias && p.categorias.length > 0 ? p.categorias : ["geral"];
-    for (const cat of cats) {
-      if (!groups[cat]) groups[cat] = new Set();
-      groups[cat].add(mapping.koterRefnetId);
-    }
+    ids.add(mapping.koterRefnetId);
   }
 
-  const result: Record<string, KoterRefnetItem[]> = {};
-  for (const [cat, ids] of Object.entries(groups)) {
-    result[cat] = [...ids].map(id => ({ refnetId: id }));
-  }
-  return result;
+  return [...ids].map(id => ({ refnetId: id }));
 }
 
 export interface KoterCityExport {
