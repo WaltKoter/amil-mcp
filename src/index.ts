@@ -26,6 +26,8 @@ import {
 import {
   searchKoterRefnets as searchKoterRefnetsLive,
 } from "./koter-client.js";
+import { getComercializacaoByState } from "./manual-vendas.js";
+import { getKoterCitiesByState } from "./koter-cities.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -250,6 +252,24 @@ async function main() {
       const result = exportForKoter(providers);
       res.json(result);
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Manual de Vendas PME (Comercialização) ──────────────────────────────
+
+  app.get("/api/comercializacao", async (req, res) => {
+    try {
+      const estado = req.query.estado as string;
+      if (!estado) {
+        res.status(400).json({ error: "Parâmetro 'estado' é obrigatório (ex: SP, RJ, MG)" });
+        return;
+      }
+      const koterCities = await getKoterCitiesByState(estado);
+      const result = await getComercializacaoByState(estado, koterCities);
+      res.json(result);
+    } catch (err: any) {
+      console.error("[Comercialização] Erro:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

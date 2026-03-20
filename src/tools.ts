@@ -8,6 +8,8 @@ import {
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
+import { getComercializacaoByState } from "./manual-vendas.js";
+import { getKoterCitiesByState } from "./koter-cities.js";
 
 export function registerTools(server: McpServer) {
   // ─── Tool: get_price_table ───────────────────────────────────────────────
@@ -269,6 +271,65 @@ export function registerTools(server: McpServer) {
           },
         ],
       };
+    }
+  );
+
+  // ─── Tool: get_comercializacao ──────────────────────────────────────────
+
+  server.tool(
+    "amil_get_comercializacao",
+    "Retorna as cidades de comercialização dos produtos Amil PME para um estado, com os IDs das cidades no Koter. Extrai dados do Manual de Vendas PME da Amil. Para produtos regionais, retorna produto + cidades. Para produtos nacionais, retorna apenas as cidades.",
+    {
+      estado: z
+        .string()
+        .describe(
+          'Estado (UF ou nome completo). Ex: "SP", "RJ", "MG", "São Paulo", "Rio de Janeiro"'
+        ),
+    },
+    async (params) => {
+      try {
+        const koterCities = await getKoterCitiesByState(params.estado);
+        const result = await getComercializacaoByState(params.estado, koterCities);
+
+        const totalRegionalCities = result.produtos_regionais.reduce(
+          (sum, p) => sum + p.cidades.length,
+          0
+        );
+        const matched = [
+          ...result.produtos_regionais.flatMap((p) => p.cidades),
+          ...result.produtos_nacionais,
+        ].filter((c) => c.koterCityId).length;
+        const total = totalRegionalCities + result.produtos_nacionais.length;
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  estado: params.estado,
+                  resumo: {
+                    produtos_regionais: result.produtos_regionais.length,
+                    cidades_regionais: totalRegionalCities,
+                    cidades_nacionais: result.produtos_nacionais.length,
+                    cidades_com_id_koter: matched,
+                    total_cidades: total,
+                  },
+                  produtos_regionais: result.produtos_regionais,
+                  produtos_nacionais: result.produtos_nacionais,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text" as const, text: `Erro: ${err.message}` }],
+          isError: true,
+        };
+      }
     }
   );
 }
