@@ -374,7 +374,7 @@ async function main() {
 
           if (!cityMatch) {
             skipped++;
-            send({ type: "progress", done: i + 1, total: allUnmapped.length, created, failed, skipped, current: p.nome, status: "skipped", reason: `Cidade "${p.cidade}" não encontrada` });
+            send({ type: "progress", done: i + 1, total: allUnmapped.length, created, failed, skipped, current: p.nome, status: "skipped", reason: `Cidade "${p.cidade}" não encontrada para "${p.estado}"` });
             continue;
           }
 

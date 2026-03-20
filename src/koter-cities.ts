@@ -21,9 +21,31 @@ const UF_TO_NAME: Record<string, string> = {
   SP: "São Paulo", SE: "Sergipe", TO: "Tocantins",
 };
 
+// Amil uses region names that map to actual states
+const AMIL_STATE_ALIASES: Record<string, string> = {
+  "SP E INTERIOR": "São Paulo",
+  "RJ E ES": "Rio de Janeiro",
+  "INTERIOR SP - 1": "São Paulo",
+  "INTERIOR SP - 2": "São Paulo",
+  "SÃO PAULO": "São Paulo",
+  "RIO DE JANEIRO": "Rio de Janeiro",
+  "BAHIA": "Bahia",
+  "CEARÁ": "Ceará",
+  "DISTRITO FEDERAL": "Distrito Federal",
+  "GOIÁS": "Goiás",
+  "MARANHÃO": "Maranhão",
+  "MINAS GERAIS": "Minas Gerais",
+  "PARAÍBA": "Paraíba",
+  "PARANÁ": "Paraná",
+  "PERNAMBUCO": "Pernambuco",
+  "RIO GRANDE DO NORTE": "Rio Grande do Norte",
+  "RIO GRANDE DO SUL": "Rio Grande do Sul",
+  "SANTA CATARINA": "Santa Catarina",
+};
+
 export async function getKoterCitiesByState(estadoQuery: string): Promise<KoterCity[]> {
   const upper = estadoQuery.toUpperCase().trim();
-  const stateName = UF_TO_NAME[upper] || estadoQuery;
+  const stateName = AMIL_STATE_ALIASES[upper] || UF_TO_NAME[upper] || estadoQuery;
 
   const stateId = await resolveStateId(stateName);
   if (!stateId) throw new Error(`State not found in Koter: ${estadoQuery}`);
