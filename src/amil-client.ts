@@ -414,6 +414,87 @@ export function getNumSubColumns(providerData: Record<string, Provider[]>): Reco
   return result;
 }
 
+// ─── Fuzzy category matching: price table ↔ provider API ─────────────────────
+
+/**
+ * Match price table categories to provider API categories using fuzzy matching.
+ * Returns a map: priceCat → apiKey
+ */
+export function matchCategoryKeys(
+  priceCategories: string[],
+  apiKeys: string[]
+): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  // Normalize: lowercase, remove separators and "amil"/"linha" prefixes
+  const normCat = (s: string) => s.toLowerCase()
+    .replace(/[_\-\s]+/g, "")
+    .replace(/^(amil|linha)/g, "")
+    .trim();
+
+  // Alias map for common Amil category name mismatches
+  const CAT_ALIASES: Record<string, string[]> = {
+    "one_black": ["Amil One Black", "One Black", "one_black", "oneblack"],
+    "amil one black": ["one_black", "One Black", "oneblack"],
+    "platinum": ["Platinum", "platinum"],
+    "ouro": ["Ouro", "ouro", "gold"],
+    "prata": ["Prata", "prata", "silver"],
+    "bronze": ["Bronze", "bronze"],
+    "amil": ["amil", "Amil"],
+    "amil facil": ["amil_facil", "Amil Facil", "amilfacil"],
+    "amil one": ["amil_one", "Amil One", "amilone"],
+    "blue": ["Blue", "blue"],
+  };
+
+  for (const priceCat of priceCategories) {
+    // Strategy 1: exact match (case-insensitive)
+    let matched = apiKeys.find(k => k.toLowerCase() === priceCat.toLowerCase());
+
+    // Strategy 2: normalized match
+    if (!matched) {
+      const normPrice = normCat(priceCat);
+      matched = apiKeys.find(k => normCat(k) === normPrice);
+    }
+
+    // Strategy 3: alias lookup
+    if (!matched) {
+      const lowerCat = priceCat.toLowerCase();
+      for (const [alias, candidates] of Object.entries(CAT_ALIASES)) {
+        if (lowerCat === alias || lowerCat.includes(alias) || alias.includes(lowerCat)) {
+          matched = apiKeys.find(k => candidates.some(c => c.toLowerCase() === k.toLowerCase()));
+          if (matched) break;
+        }
+      }
+    }
+
+    // Strategy 4: substring/contains match
+    if (!matched) {
+      const normPrice = normCat(priceCat);
+      matched = apiKeys.find(k => {
+        const normApi = normCat(k);
+        return normApi.includes(normPrice) || normPrice.includes(normApi);
+      });
+    }
+
+    // Strategy 5: word overlap
+    if (!matched) {
+      const priceWords = priceCat.toLowerCase().split(/[\s_\-]+/).filter(w => w.length > 2 && !["amil", "linha"].includes(w));
+      matched = apiKeys.find(k => {
+        const apiWords = k.toLowerCase().split(/[\s_\-]+/).filter(w => w.length > 2);
+        return priceWords.some(pw => apiWords.some(aw => aw === pw || aw.includes(pw) || pw.includes(aw)));
+      });
+    }
+
+    if (matched) {
+      result[priceCat] = matched;
+    } else {
+      console.warn(`[Category Match] ⚠️ No match for "${priceCat}". API keys: [${apiKeys.join(", ")}]`);
+    }
+  }
+
+  return result;
+}
+
 // ─── Get form options for a given linha ──────────────────────────────────────
 
 export function getFormOptions(linha: string) {

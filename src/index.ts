@@ -13,6 +13,7 @@ import {
   getFormOptions,
   getSubColumnIndex,
   getNumSubColumns,
+  matchCategoryKeys,
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
@@ -756,13 +757,9 @@ async function main() {
         plansByCategory[catKey].push(p);
       }
 
-      // Match price table categories to provider data categories (case-insensitive)
-      const catApiKeyMap: Record<string, string> = {};
-      for (const priceCat of Object.keys(plansByCategory)) {
-        const normPriceCat = priceCat.toLowerCase();
-        const apiKey = Object.keys(providerData).find(k => k.toLowerCase() === normPriceCat);
-        if (apiKey) catApiKeyMap[priceCat] = apiKey;
-      }
+      // Match price table categories to provider data categories (fuzzy matching)
+      const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
+      console.log("[Super Route] Category mapping:", JSON.stringify(catApiKeyMap));
 
       // For each plan, filter providers that accept it and get their refnet IDs
       const planRefnetMap: Record<string, string[]> = {};

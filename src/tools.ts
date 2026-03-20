@@ -7,6 +7,7 @@ import {
   getFormOptions,
   getSubColumnIndex,
   getNumSubColumns,
+  matchCategoryKeys,
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
@@ -522,11 +523,7 @@ export function registerTools(server: McpServer) {
         if (!plansByCategory[p.categoria]) plansByCategory[p.categoria] = [];
         plansByCategory[p.categoria].push(p);
       }
-      const catApiKeyMap: Record<string, string> = {};
-      for (const priceCat of Object.keys(plansByCategory)) {
-        const apiKey = Object.keys(providerData).find(k => k.toLowerCase() === priceCat.toLowerCase());
-        if (apiKey) catApiKeyMap[priceCat] = apiKey;
-      }
+      const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
 
       // Get refnet IDs per plan (filtered by sub-column acceptance)
       const planRefnetMap: Record<string, string[]> = {};
