@@ -11,6 +11,7 @@ import {
   getStates,
   getFormOptions,
   ALL_LINHAS,
+  REGIOES,
 } from "./amil-client.js";
 import { fetchPriceTablePdf, fetchNetworkPdf } from "./pdf-scraper.js";
 import { initDb } from "./db.js";
@@ -19,9 +20,16 @@ import {
   upsertMapping,
   deleteMapping,
   autoMatchProviders,
-  exportForKoter,
+  exportRefnetsForKoter,
+  exportCitiesForKoter,
   saveNetworkResults,
   getLastNetworkResults,
+  upsertAllProviders,
+  getAllStoredProviders,
+  getProviderStates,
+  getProviderStats,
+  clearAllProviders,
+  type AllProvider,
 } from "./mapping-store.js";
 import {
   searchKoterRefnets as searchKoterRefnetsLive,
@@ -33,8 +41,7 @@ const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
-  initDb();
-  console.log("[DB] SQLite initialized");
+  await initDb();
 
   const app = express();
   app.use(express.json({ limit: "10mb" }));
@@ -122,7 +129,7 @@ async function main() {
           }
         }
       }
-      saveNetworkResults(flat, { regiao, estado, linha, tipo_rede: tipo_rede || "Hospitais" });
+      await saveNetworkResults(flat, { regiao, estado, linha, tipo_rede: tipo_rede || "Hospitais" });
 
       res.json(data);
     } catch (err: any) {
@@ -130,8 +137,8 @@ async function main() {
     }
   });
 
-  app.get("/api/network/last-results", (_req, res) => {
-    res.json(getLastNetworkResults());
+  app.get("/api/network/last-results", async (_req, res) => {
+    res.json(await getLastNetworkResults());
   });
 
   // ─── PDF endpoints (Puppeteer scraping from Amil) ────────────────────────
@@ -176,19 +183,19 @@ async function main() {
 
   // ─── Mapping endpoints (Amil ↔ Koter refnets) ──────────────────────────
 
-  app.get("/api/mappings", (req, res) => {
+  app.get("/api/mappings", async (req, res) => {
     const estado = req.query.estado as string | undefined;
-    res.json(getAllMappings(estado));
+    res.json(await getAllMappings(estado));
   });
 
-  app.post("/api/mappings", (req, res) => {
+  app.post("/api/mappings", async (req, res) => {
     try {
       const { amilNome, amilCidade, amilEstado, koterRefnetId, koterRefnetName } = req.body;
       if (!amilNome || !amilCidade || !koterRefnetId) {
         res.status(400).json({ error: "amilNome, amilCidade e koterRefnetId são obrigatórios" });
         return;
       }
-      const mapping = upsertMapping({
+      const mapping = await upsertMapping({
         amilNome,
         amilCidade,
         amilEstado: amilEstado || "",
@@ -202,13 +209,13 @@ async function main() {
     }
   });
 
-  app.delete("/api/mappings", (req, res) => {
+  app.delete("/api/mappings", async (req, res) => {
     const { nome, cidade } = req.query as { nome: string; cidade: string };
     if (!nome || !cidade) {
       res.status(400).json({ error: "nome e cidade são obrigatórios" });
       return;
     }
-    const ok = deleteMapping(nome, cidade);
+    const ok = await deleteMapping(nome, cidade);
     res.json({ deleted: ok });
   });
 
@@ -242,14 +249,34 @@ async function main() {
     }
   });
 
-  app.post("/api/mappings/export", (req, res) => {
+  app.post("/api/mappings/export-refnets", async (req, res) => {
     try {
-      const { providers } = req.body;
+      const { providers, productNames } = req.body;
       if (!Array.isArray(providers)) {
-        res.status(400).json({ error: "Body deve conter { providers: [...] }" });
+        res.status(400).json({ error: "Body deve conter { providers, productNames }" });
         return;
       }
-      const result = exportForKoter(providers);
+      const result = await exportRefnetsForKoter(
+        providers,
+        productNames || []
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/comercializacao/export-cities", (req, res) => {
+    try {
+      const { cityIds, productNames } = req.body;
+      if (!Array.isArray(cityIds)) {
+        res.status(400).json({ error: "Body deve conter { cityIds, productNames }" });
+        return;
+      }
+      const result = exportCitiesForKoter(
+        cityIds,
+        productNames || []
+      );
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -274,10 +301,144 @@ async function main() {
     }
   });
 
+  // ─── All Providers (fetch entire Amil network) ─────────────────────────────
+
+  app.get("/api/network/all-providers", async (req, res) => {
+    const { estado, tipo_rede, status, search, page, pageSize } = req.query as Record<string, string>;
+    const result = await getAllStoredProviders({
+      estado: estado || undefined,
+      tipoRede: tipo_rede || undefined,
+      status: status || undefined,
+      search: search || undefined,
+      page: page ? parseInt(page) : 1,
+      pageSize: pageSize ? parseInt(pageSize) : 50,
+    });
+    res.json(result);
+  });
+
+  app.get("/api/network/all-providers/stats", async (req, res) => {
+    const { estado, tipo_rede } = req.query as Record<string, string>;
+    res.json(await getProviderStats({ estado: estado || undefined, tipoRede: tipo_rede || undefined }));
+  });
+
+  app.get("/api/network/all-providers/states", async (_req, res) => {
+    res.json(await getProviderStates());
+  });
+
+  app.delete("/api/network/all-providers", async (req, res) => {
+    const tipoRede = req.query.tipo_rede as string | undefined;
+    await clearAllProviders(tipoRede);
+    res.json({ cleared: true });
+  });
+
+  // SSE endpoint: fetch all providers from Amil across all linhas/regioes/estados
+  app.get("/api/network/fetch-all", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const tipoRede = (req.query.tipo_rede as string) || "Hospitais";
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    const send = (data: any) => {
+      if (!aborted) res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const linhas = ALL_LINHAS.map((l) => l.id);
+      const regioes = [...REGIOES];
+
+      send({ type: "phase", phase: "states", message: "Descobrindo estados disponíveis..." });
+      const combos: Array<{ linha: string; regiao: string; estado: string }> = [];
+      let statesDone = 0;
+      const totalStateCalls = linhas.length * regioes.length;
+
+      for (const linha of linhas) {
+        for (const regiao of regioes) {
+          if (aborted) break;
+          try {
+            const states = await getStates({ regiao, linha });
+            for (const s of states) {
+              combos.push({ linha, regiao, estado: s.name });
+            }
+          } catch {}
+          statesDone++;
+          send({ type: "progress", phase: "states", done: statesDone, total: totalStateCalls });
+        }
+        if (aborted) break;
+      }
+
+      if (aborted) { res.end(); return; }
+
+      const uniqueCombos = [
+        ...new Map(combos.map((c) => [`${c.linha}|${c.regiao}|${c.estado}`, c])).values(),
+      ];
+
+      send({ type: "phase", phase: "providers", total: uniqueCombos.length, message: `Buscando prestadores (${uniqueCombos.length} combinações)...` });
+
+      let provDone = 0;
+      let totalStored = 0;
+
+      for (const combo of uniqueCombos) {
+        if (aborted) break;
+        try {
+          const data = await getProviders({
+            regiao: combo.regiao,
+            estado: combo.estado,
+            linha: combo.linha,
+            tipo_rede: tipoRede,
+          });
+
+          const batch: AllProvider[] = [];
+          for (const [cat, items] of Object.entries(data)) {
+            if (!Array.isArray(items)) continue;
+            for (const item of items as any[]) {
+              const existing = batch.find((b) => b.nome === item.nome && b.cidade === item.cidade);
+              if (existing) {
+                if (!existing.categorias.includes(cat)) existing.categorias.push(cat);
+                if (!existing.linhas.includes(combo.linha)) existing.linhas.push(combo.linha);
+              } else {
+                batch.push({
+                  nome: item.nome,
+                  cidade: item.cidade,
+                  estado: item.estado || combo.estado,
+                  tipoRede: tipoRede,
+                  linhas: [combo.linha],
+                  categorias: [cat],
+                  modalidades: item.modalidades || "",
+                });
+              }
+            }
+          }
+
+          if (batch.length) {
+            await upsertAllProviders(batch);
+            totalStored += batch.length;
+          }
+        } catch {}
+
+        provDone++;
+        if (provDone % 3 === 0 || provDone === uniqueCombos.length) {
+          send({ type: "progress", phase: "providers", done: provDone, total: uniqueCombos.length, stored: totalStored });
+        }
+
+        await new Promise((r) => setTimeout(r, 80));
+      }
+
+      const stats = await getProviderStats({ tipoRede });
+      send({ type: "done", stats });
+    } catch (err: any) {
+      send({ type: "error", message: err.message });
+    }
+
+    res.end();
+  });
+
   // ─── MCP Endpoint (session-aware) ─────────────────────────────────────────
   const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
-  // Inject Accept header if missing (some clients like Manus don't send it)
   app.all("/mcp", (req, _res, next) => {
     if (!req.headers.accept || !req.headers.accept.includes("text/event-stream")) {
       req.headers.accept = "application/json, text/event-stream";
@@ -288,14 +449,12 @@ async function main() {
   app.all("/mcp", async (req, res) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
-    // If client sends a session ID, reuse that session
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
       await session.transport.handleRequest(req, res, req.body);
       return;
     }
 
-    // New session
     const server = new McpServer({
       name: "amil-consulta",
       version: "1.0.0",
@@ -309,7 +468,6 @@ async function main() {
     res.on("close", () => {
       const sid = transport.sessionId;
       if (sid && sessions.has(sid)) {
-        // Keep session alive for a while for multi-request clients
         setTimeout(() => {
           const s = sessions.get(sid);
           if (s) {
@@ -317,13 +475,12 @@ async function main() {
             s.server.close();
             sessions.delete(sid);
           }
-        }, 5 * 60 * 1000); // 5 min TTL
+        }, 5 * 60 * 1000);
       }
     });
 
     await server.connect(transport);
 
-    // Store session after connect so sessionId is available
     if (transport.sessionId) {
       sessions.set(transport.sessionId, { server, transport });
     }

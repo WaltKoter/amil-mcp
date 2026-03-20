@@ -1,4 +1,4 @@
-import { getDb } from "./db.js";
+import { query } from "./db.js";
 import { searchKoterRefnets as searchKoterLive, KoterRefnetResult } from "./koter-client.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -26,102 +26,237 @@ export interface AutoMatchResult {
   confidence: number;
 }
 
+// ─── All Providers (full Amil network) ──────────────────────────────────────
+
+export interface AllProvider {
+  nome: string;
+  cidade: string;
+  estado: string;
+  tipoRede: string;
+  linhas: string[];
+  categorias: string[];
+  modalidades: string;
+}
+
+export interface AllProviderWithMapping extends AllProvider {
+  koterRefnetId: string | null;
+  koterRefnetName: string | null;
+}
+
+export async function upsertAllProviders(providers: AllProvider[]): Promise<void> {
+  for (const p of providers) {
+    const existing = await query(
+      `SELECT linhas, categorias FROM all_providers WHERE nome = $1 AND cidade = $2 AND tipo_rede = $3`,
+      [p.nome, p.cidade, p.tipoRede]
+    );
+
+    let linhas = p.linhas;
+    let categorias = p.categorias;
+    if (existing.rows.length > 0) {
+      const el = JSON.parse(existing.rows[0].linhas || "[]");
+      const ec = JSON.parse(existing.rows[0].categorias || "[]");
+      linhas = [...new Set([...el, ...linhas])];
+      categorias = [...new Set([...ec, ...categorias])];
+    }
+
+    await query(
+      `INSERT INTO all_providers (nome, cidade, estado, tipo_rede, linhas, categorias, modalidades)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (nome, cidade, tipo_rede) DO UPDATE SET
+         estado = EXCLUDED.estado, linhas = EXCLUDED.linhas,
+         categorias = EXCLUDED.categorias, modalidades = EXCLUDED.modalidades,
+         fetched_at = NOW()`,
+      [p.nome, p.cidade, p.estado, p.tipoRede, JSON.stringify(linhas), JSON.stringify(categorias), p.modalidades]
+    );
+  }
+}
+
+export async function getAllStoredProviders(filters: {
+  estado?: string;
+  tipoRede?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ providers: AllProviderWithMapping[]; total: number }> {
+  const conditions: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+
+  if (filters.estado) {
+    conditions.push(`p.estado = $${idx++}`);
+    params.push(filters.estado);
+  }
+  if (filters.tipoRede) {
+    conditions.push(`p.tipo_rede = $${idx++}`);
+    params.push(filters.tipoRede);
+  }
+  if (filters.search) {
+    conditions.push(`(p.nome ILIKE $${idx} OR p.cidade ILIKE $${idx})`);
+    params.push(`%${filters.search}%`);
+    idx++;
+  }
+  if (filters.status === "mapped") {
+    conditions.push(`m.koter_refnet_id IS NOT NULL`);
+  } else if (filters.status === "pending") {
+    conditions.push(`m.koter_refnet_id IS NULL`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const page = filters.page || 1;
+  const pageSize = filters.pageSize || 50;
+  const offset = (page - 1) * pageSize;
+
+  const countResult = await query(
+    `SELECT COUNT(*) as cnt FROM all_providers p
+     LEFT JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+     ${where}`,
+    params
+  );
+
+  const dataResult = await query(
+    `SELECT p.nome, p.cidade, p.estado, p.tipo_rede as "tipoRede", p.linhas, p.categorias, p.modalidades,
+            m.koter_refnet_id as "koterRefnetId", m.koter_refnet_name as "koterRefnetName"
+     FROM all_providers p
+     LEFT JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+     ${where}
+     ORDER BY p.estado, p.cidade, p.nome
+     LIMIT $${idx} OFFSET $${idx + 1}`,
+    [...params, pageSize, offset]
+  );
+
+  return {
+    providers: dataResult.rows.map((r: any) => ({
+      nome: r.nome,
+      cidade: r.cidade,
+      estado: r.estado,
+      tipoRede: r.tipoRede,
+      linhas: JSON.parse(r.linhas || "[]"),
+      categorias: JSON.parse(r.categorias || "[]"),
+      modalidades: r.modalidades || "",
+      koterRefnetId: r.koterRefnetId || null,
+      koterRefnetName: r.koterRefnetName || null,
+    })),
+    total: parseInt(countResult.rows[0].cnt),
+  };
+}
+
+export async function getProviderStates(): Promise<string[]> {
+  const result = await query(`SELECT DISTINCT estado FROM all_providers ORDER BY estado`);
+  return result.rows.map((r: any) => r.estado);
+}
+
+export async function getProviderStats(filters?: { estado?: string; tipoRede?: string }): Promise<{
+  total: number;
+  mapped: number;
+  pending: number;
+}> {
+  const conditions: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+  if (filters?.estado) { conditions.push(`p.estado = $${idx++}`); params.push(filters.estado); }
+  if (filters?.tipoRede) { conditions.push(`p.tipo_rede = $${idx++}`); params.push(filters.tipoRede); }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const totalR = await query(`SELECT COUNT(*) as cnt FROM all_providers p ${where}`, params);
+  const mappedR = await query(
+    `SELECT COUNT(*) as cnt FROM all_providers p
+     INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+     ${where}`,
+    params
+  );
+  const total = parseInt(totalR.rows[0].cnt);
+  const mapped = parseInt(mappedR.rows[0].cnt);
+  return { total, mapped, pending: total - mapped };
+}
+
+export async function clearAllProviders(tipoRede?: string): Promise<void> {
+  if (tipoRede) {
+    await query(`DELETE FROM all_providers WHERE tipo_rede = $1`, [tipoRede]);
+  } else {
+    await query(`DELETE FROM all_providers`);
+  }
+}
+
 // ─── Mappings CRUD ──────────────────────────────────────────────────────────
 
-export function getAllMappings(estado?: string): RefnetMapping[] {
-  const db = getDb();
+export async function getAllMappings(estado?: string): Promise<RefnetMapping[]> {
   if (estado) {
-    return db
-      .prepare(
-        `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
-                koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
-         FROM mappings WHERE UPPER(amil_estado) = UPPER(?)`
-      )
-      .all(estado) as RefnetMapping[];
+    const result = await query(
+      `SELECT amil_nome as "amilNome", amil_cidade as "amilCidade", amil_estado as "amilEstado",
+              koter_refnet_id as "koterRefnetId", koter_refnet_name as "koterRefnetName", created_at as "createdAt"
+       FROM mappings WHERE UPPER(amil_estado) = UPPER($1)`,
+      [estado]
+    );
+    return result.rows;
   }
-  return db
-    .prepare(
-      `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
-              koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
-       FROM mappings`
-    )
-    .all() as RefnetMapping[];
+  const result = await query(
+    `SELECT amil_nome as "amilNome", amil_cidade as "amilCidade", amil_estado as "amilEstado",
+            koter_refnet_id as "koterRefnetId", koter_refnet_name as "koterRefnetName", created_at as "createdAt"
+     FROM mappings`
+  );
+  return result.rows;
 }
 
-export function getMappingByKey(nome: string, cidade: string): RefnetMapping | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
-              koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
-       FROM mappings WHERE amil_nome = ? AND amil_cidade = ?`
-    )
-    .get(nome, cidade) as RefnetMapping | undefined;
-  return row || null;
+export async function getMappingByKey(nome: string, cidade: string): Promise<RefnetMapping | null> {
+  const result = await query(
+    `SELECT amil_nome as "amilNome", amil_cidade as "amilCidade", amil_estado as "amilEstado",
+            koter_refnet_id as "koterRefnetId", koter_refnet_name as "koterRefnetName", created_at as "createdAt"
+     FROM mappings WHERE amil_nome = $1 AND amil_cidade = $2`,
+    [nome, cidade]
+  );
+  return result.rows[0] || null;
 }
 
-export function upsertMapping(mapping: RefnetMapping): RefnetMapping {
-  const db = getDb();
-  db.prepare(
-    `INSERT OR REPLACE INTO mappings (amil_nome, amil_cidade, amil_estado, koter_refnet_id, koter_refnet_name)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(
-    mapping.amilNome,
-    mapping.amilCidade,
-    mapping.amilEstado,
-    mapping.koterRefnetId,
-    mapping.koterRefnetName
+export async function upsertMapping(mapping: RefnetMapping): Promise<RefnetMapping> {
+  await query(
+    `INSERT INTO mappings (amil_nome, amil_cidade, amil_estado, koter_refnet_id, koter_refnet_name)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (amil_nome, amil_cidade) DO UPDATE SET
+       amil_estado = EXCLUDED.amil_estado,
+       koter_refnet_id = EXCLUDED.koter_refnet_id,
+       koter_refnet_name = EXCLUDED.koter_refnet_name`,
+    [mapping.amilNome, mapping.amilCidade, mapping.amilEstado, mapping.koterRefnetId, mapping.koterRefnetName]
   );
   return mapping;
 }
 
-export function deleteMapping(nome: string, cidade: string): boolean {
-  const db = getDb();
-  const result = db
-    .prepare(`DELETE FROM mappings WHERE amil_nome = ? AND amil_cidade = ?`)
-    .run(nome, cidade);
-  return result.changes > 0;
+export async function deleteMapping(nome: string, cidade: string): Promise<boolean> {
+  const result = await query(
+    `DELETE FROM mappings WHERE amil_nome = $1 AND amil_cidade = $2`,
+    [nome, cidade]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 // ─── Last Network Results ───────────────────────────────────────────────────
 
-export function saveNetworkResults(
+export async function saveNetworkResults(
   providers: NetworkProvider[],
   searchParams: Record<string, string>
-): void {
-  const db = getDb();
+): Promise<void> {
   const paramsJson = JSON.stringify(searchParams);
-  const tx = db.transaction(() => {
-    db.prepare(`DELETE FROM last_network_results`).run();
-    const stmt = db.prepare(
+  await query(`DELETE FROM last_network_results`);
+  for (const p of providers) {
+    await query(
       `INSERT INTO last_network_results (nome, cidade, estado, categorias, search_params)
-       VALUES (?, ?, ?, ?, ?)`
+       VALUES ($1, $2, $3, $4, $5)`,
+      [p.nome, p.cidade, p.estado, JSON.stringify(p.categorias), paramsJson]
     );
-    for (const p of providers) {
-      stmt.run(p.nome, p.cidade, p.estado, JSON.stringify(p.categorias), paramsJson);
-    }
-  });
-  tx();
+  }
 }
 
-export function getLastNetworkResults(): {
+export async function getLastNetworkResults(): Promise<{
   providers: NetworkProvider[];
   searchParams: Record<string, string> | null;
-} {
-  const db = getDb();
-  const rows = db
-    .prepare(`SELECT nome, cidade, estado, categorias, search_params FROM last_network_results ORDER BY id`)
-    .all() as Array<{
-    nome: string;
-    cidade: string;
-    estado: string;
-    categorias: string;
-    search_params: string;
-  }>;
+}> {
+  const result = await query(
+    `SELECT nome, cidade, estado, categorias, search_params FROM last_network_results ORDER BY id`
+  );
 
-  if (!rows.length) return { providers: [], searchParams: null };
+  if (!result.rows.length) return { providers: [], searchParams: null };
 
-  const providers = rows.map((r) => ({
+  const providers = result.rows.map((r: any) => ({
     nome: r.nome,
     cidade: r.cidade,
     estado: r.estado,
@@ -130,7 +265,7 @@ export function getLastNetworkResults(): {
 
   let searchParams = null;
   try {
-    searchParams = JSON.parse(rows[0].search_params);
+    searchParams = JSON.parse(result.rows[0].search_params);
   } catch {}
 
   return { providers, searchParams };
@@ -144,16 +279,14 @@ export async function autoMatchProviders(
   const results: AutoMatchResult[] = [];
 
   for (const p of providers) {
-    const existing = getMappingByKey(p.nome, p.cidade);
+    const existing = await getMappingByKey(p.nome, p.cidade);
     if (existing) continue;
 
     try {
-      // Search Koter MCP by provider name, filtered by state
       const { refnets } = await searchKoterLive(p.nome, p.estado, 1, 5);
 
       if (refnets.length > 0) {
-        // Score best match by similarity
-        const best = refnets[0]; // MCP already returns ranked by relevance
+        const best = refnets[0];
         const confidence = computeConfidence(p.nome, p.cidade, best);
 
         results.push({
@@ -200,7 +333,6 @@ function computeConfidence(amilNome: string, amilCidade: string, koterRefnet: Ko
     score = matches.length / Math.max(tokensA.length, tokensB.length);
   }
 
-  // Boost if city matches
   const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
   if (normCity(amilCidade) === normCity(koterRefnet.cityName || "")) {
     score = Math.min(1, score + 0.15);
@@ -209,21 +341,45 @@ function computeConfidence(amilNome: string, amilCidade: string, koterRefnet: Ko
   return score;
 }
 
-// ─── Export ─────────────────────────────────────────────────────────────────
+// ─── Export for Koter ────────────────────────────────────────────────────────
 
-export function exportForKoter(
-  providers: Array<{ nome: string; cidade: string }>
-): Array<{ refnetId: string }> {
-  const result: Array<{ refnetId: string }> = [];
+export interface KoterRefnetExport {
+  externalApiProductIds: string[];
+  productNames: string[];
+  refnetIds: string[];
+}
+
+export async function exportRefnetsForKoter(
+  providers: Array<{ nome: string; cidade: string }>,
+  productNames: string[]
+): Promise<KoterRefnetExport> {
+  const refnetIds: string[] = [];
   const seen = new Set<string>();
 
   for (const p of providers) {
-    const mapping = getMappingByKey(p.nome, p.cidade);
+    const mapping = await getMappingByKey(p.nome, p.cidade);
     if (mapping && !seen.has(mapping.koterRefnetId)) {
-      result.push({ refnetId: mapping.koterRefnetId });
+      refnetIds.push(mapping.koterRefnetId);
       seen.add(mapping.koterRefnetId);
     }
   }
 
-  return result;
+  return { externalApiProductIds: [], productNames, refnetIds };
+}
+
+export interface KoterCityExport {
+  externalApiProductIds: string[];
+  productNames: string[];
+  cityIds: string[];
+}
+
+export function exportCitiesForKoter(
+  cityIds: string[],
+  productNames: string[]
+): KoterCityExport {
+  return {
+    externalApiProductIds: [],
+    productNames,
+    cityIds: [...new Set(cityIds.filter(Boolean))],
+  };
 }

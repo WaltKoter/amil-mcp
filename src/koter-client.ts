@@ -10,21 +10,38 @@ let client: Client | null = null;
 // State name -> Koter stateId mapping (cached on first fetch)
 let statesCache: Array<{ id: string; name: string; abbreviation: string }> | null = null;
 
+function resetClient(): void {
+  try { client?.close(); } catch {}
+  client = null;
+}
+
 async function getClient(): Promise<Client> {
   if (client) return client;
 
-  client = new Client({ name: "amil-mcp-koter-client", version: "1.0.0" });
+  const c = new Client({ name: "amil-mcp-koter-client", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(KOTER_MCP_URL));
-  await client.connect(transport);
+  await c.connect(transport);
+  client = c;
   return client;
+}
+
+export async function callKoterTool(name: string, args: Record<string, any>): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const c = await getClient();
+      return await c.callTool({ name, arguments: args });
+    } catch (err: any) {
+      console.error(`[Koter MCP] Tool ${name} failed (attempt ${attempt + 1}):`, err.message);
+      resetClient();
+      if (attempt === 1) throw err;
+    }
+  }
 }
 
 async function getStates(): Promise<Array<{ id: string; name: string; abbreviation: string }>> {
   if (statesCache) return statesCache;
 
-  const c = await getClient();
-  const result = await c.callTool({ name: "fetch_all_states", arguments: {} });
-  // Parse the text content to extract states
+  const result = await callKoterTool("fetch_all_states", {});
   const text = (result.content as Array<{ type: string; text: string }>)
     .filter((c) => c.type === "text")
     .map((c) => c.text)
@@ -68,15 +85,13 @@ export async function searchKoterRefnets(
   page = 1,
   pageSize = 20
 ): Promise<{ refnets: KoterRefnetResult[]; total: number }> {
-  const c = await getClient();
-
   const args: Record<string, any> = { name: query, page, pageSize };
   if (stateName) {
     const stateId = await resolveStateId(stateName);
     if (stateId) args.stateId = stateId;
   }
 
-  const result = await c.callTool({ name: "fetch_referenced_networks_cadastro", arguments: args });
+  const result = await callKoterTool("fetch_referenced_networks_cadastro", args);
   const text = (result.content as Array<{ type: string; text: string }>)
     .filter((c) => c.type === "text")
     .map((c) => c.text)

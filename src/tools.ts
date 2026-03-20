@@ -10,6 +10,13 @@ import {
 } from "./amil-client.js";
 import { getComercializacaoByState } from "./manual-vendas.js";
 import { getKoterCitiesByState } from "./koter-cities.js";
+import {
+  getAllStoredProviders,
+  getProviderStats,
+  getProviderStates,
+  getAllMappings,
+  exportRefnetsForKoter,
+} from "./mapping-store.js";
 
 export function registerTools(server: McpServer) {
   // ─── Tool: get_price_table ───────────────────────────────────────────────
@@ -330,6 +337,118 @@ export function registerTools(server: McpServer) {
           isError: true,
         };
       }
+    }
+  );
+
+  // ─── Tool: get_stored_providers ─────────────────────────────────────────
+
+  server.tool(
+    "amil_get_stored_providers",
+    "Lista prestadores Amil armazenados no banco de dados (hospitais/laboratórios). Retorna resultados paginados com filtros por estado, tipo de rede, status de mapeamento e busca por nome/cidade.",
+    {
+      estado: z.string().optional().describe("Filtrar por estado (ex: SP e Interior, RJ e ES)"),
+      tipo_rede: z.string().optional().describe('Tipo: "Hospitais" ou "Laboratórios" (padrão: todos)'),
+      status: z.string().optional().describe('"mapped" (já mapeados), "pending" (sem mapeamento), ou vazio para todos'),
+      search: z.string().optional().describe("Buscar por nome ou cidade"),
+      page: z.number().optional().describe("Página (padrão: 1)"),
+      pageSize: z.number().optional().describe("Itens por página (padrão: 50, máx: 200)"),
+    },
+    async (params) => {
+      const result = await getAllStoredProviders({
+        estado: params.estado,
+        tipoRede: params.tipo_rede,
+        status: params.status as any,
+        search: params.search,
+        page: params.page || 1,
+        pageSize: Math.min(params.pageSize || 50, 200),
+      });
+      const stats = await getProviderStats({
+        estado: params.estado,
+        tipoRede: params.tipo_rede,
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            stats,
+            page: params.page || 1,
+            pageSize: Math.min(params.pageSize || 50, 200),
+            total: result.total,
+            providers: result.providers,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── Tool: get_provider_stats ──────────────────────────────────────────
+
+  server.tool(
+    "amil_get_provider_stats",
+    "Retorna estatísticas dos prestadores Amil armazenados: total, mapeados e pendentes. Também lista os estados disponíveis.",
+    {
+      estado: z.string().optional().describe("Filtrar por estado"),
+      tipo_rede: z.string().optional().describe('Filtrar por tipo: "Hospitais" ou "Laboratórios"'),
+    },
+    async (params) => {
+      const stats = await getProviderStats({
+        estado: params.estado,
+        tipoRede: params.tipo_rede,
+      });
+      const states = await getProviderStates();
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ stats, estados_disponiveis: states }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── Tool: get_mappings ───────────────────────────────────────────────
+
+  server.tool(
+    "amil_get_mappings",
+    "Retorna os mapeamentos Amil → Koter (prestador Amil vinculado a rede referenciada do Koter). Cada mapeamento contém o ID da rede no Koter.",
+    {
+      estado: z.string().optional().describe("Filtrar por estado (ex: SP, RJ)"),
+    },
+    async (params) => {
+      const mappings = await getAllMappings(params.estado);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            total: mappings.length,
+            mappings,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── Tool: export_refnets_for_koter ───────────────────────────────────
+
+  server.tool(
+    "amil_export_refnets_for_koter",
+    "Exporta os IDs das redes referenciadas mapeadas no formato de importação do Koter. Retorna { externalApiProductIds: [], productNames: [...], refnetIds: [...] }.",
+    {
+      estado: z.string().optional().describe("Filtrar mapeamentos por estado"),
+      productNames: z.array(z.string()).describe("Nomes dos produtos no Koter para vincular as redes"),
+    },
+    async (params) => {
+      const mappings = await getAllMappings(params.estado);
+      const providers = mappings.map(m => ({ nome: m.amilNome, cidade: m.amilCidade }));
+      const result = await exportRefnetsForKoter(providers, params.productNames);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
     }
   );
 }
