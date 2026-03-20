@@ -4,3 +4,7 @@ services:
     restart: unless-stopped
     environment:
       - PORT=3001
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://amilpostgress:Gaminha1%4016516156106216121121@koter_amil-postgress:5432/amil-postgress?sslmode=disable
+      - KOTER_MCP_URL=https://api.koter.app/mcp/networks/legacy?apiKey=MhuVw8HA/Zf2FrGV01Qho5UeIei73k4qpyjhBjASU/hlLrzeJmCs5hvN0P9A3pLxKDo/HeRGWk7boKfy3vPjJA==
+      - KOTER_USER_ID=d2i4sdzg8nh7vy2egv4rjers

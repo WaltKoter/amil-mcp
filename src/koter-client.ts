@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
+const FALLBACK_KOTER_MCP_URL = "https://api.koter.app/mcp/networks/legacy?apiKey=MhuVw8HA/Zf2FrGV01Qho5UeIei73k4qpyjhBjASU/hlLrzeJmCs5hvN0P9A3pLxKDo/HeRGWk7boKfy3vPjJA==";
+
 function getKoterMcpUrl(): string {
-  const url = process.env.KOTER_MCP_URL;
-  if (!url) throw new Error("KOTER_MCP_URL environment variable is required");
+  const url = process.env.KOTER_MCP_URL || FALLBACK_KOTER_MCP_URL;
   return url;
 }
 

@@ -13,8 +13,37 @@ export async function query(text: string, params?: any[]): Promise<pg.QueryResul
 }
 
 export async function initDb(): Promise<void> {
-  const connStr = process.env.DATABASE_URL;
-  if (!connStr) throw new Error("DATABASE_URL environment variable is required");
+  // Fallback connection strings for when env vars aren't properly injected
+  const FALLBACK_INTERNAL = "postgres://amilpostgress:Gaminha1%4016516156106216121121@koter_amil-postgress:5432/amil-postgress?sslmode=disable";
+  const FALLBACK_EXTERNAL = "postgres://amilpostgress:Gaminha1%4016516156106216121121@147.93.33.67:5433/amil-postgress?sslmode=disable";
+
+  let connStr = process.env.DATABASE_URL;
+
+  // If DATABASE_URL contains unencoded @ in password, fix it
+  if (connStr) {
+    // Encode @ in password: format is postgres://user:pass@host:port/db
+    const match = connStr.match(/^(postgres(?:ql)?:\/\/)([^:]+):(.+)@([^@]+)$/);
+    if (match) {
+      const [, proto, user, passAndRest] = match;
+      // passAndRest could be "Gaminha1@16516156106216121121@host:5432/db"
+      // We need to find the LAST @ which separates password from host
+      const lastAt = passAndRest.lastIndexOf("@");
+      if (lastAt > 0) {
+        const password = passAndRest.substring(0, lastAt);
+        const hostPart = passAndRest.substring(lastAt + 1);
+        const encodedPassword = encodeURIComponent(password);
+        connStr = `${proto}${user}:${encodedPassword}@${hostPart}`;
+        console.log("[DB] Fixed @ in password encoding");
+      }
+    }
+  }
+
+  if (!connStr) {
+    // Try internal first (production/docker), fall back to external (local dev)
+    const isProduction = process.env.NODE_ENV === "production";
+    connStr = isProduction ? FALLBACK_INTERNAL : FALLBACK_EXTERNAL;
+    console.log(`[DB] No DATABASE_URL env, using ${isProduction ? "internal" : "external"} fallback`);
+  }
 
   pool = new pg.Pool({
     connectionString: connStr,
