@@ -58,9 +58,20 @@ function normalizeForMatch(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
 }
 
+// Map Amil region names to actual state names
+const AMIL_STATE_ALIASES: Record<string, string> = {
+  "SP E INTERIOR": "São Paulo",
+  "RJ E ES": "Rio de Janeiro",
+  "INTERIOR SP - 1": "São Paulo",
+  "INTERIOR SP - 2": "São Paulo",
+};
+
 export async function resolveStateId(stateName: string): Promise<string | null> {
   const states = await getStates();
-  const norm = normalizeForMatch(stateName);
+  // Check alias first
+  const aliased = AMIL_STATE_ALIASES[stateName.toUpperCase().trim()];
+  const norm = normalizeForMatch(aliased || stateName);
+
   const found = states.find((s) => normalizeForMatch(s.name) === norm);
   if (found) return found.id;
   // Try partial match
