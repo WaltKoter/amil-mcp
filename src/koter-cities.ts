@@ -57,3 +57,22 @@ export async function getKoterCitiesByState(estadoQuery: string): Promise<KoterC
   console.log(`[KoterCities] Cached ${cities.length} cities for ${stateName}`);
   return cities;
 }
+
+/**
+ * Resolve an Amil city name to a Koter city (with ID) for a given state.
+ * Uses NFD normalization for accent-insensitive matching.
+ */
+export async function resolveKoterCityId(
+  amilCityName: string,
+  estadoQuery: string
+): Promise<KoterCity | null> {
+  const normCity = (s: string) =>
+    s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  try {
+    const cities = await getKoterCitiesByState(estadoQuery);
+    const norm = normCity(amilCityName);
+    return cities.find((c) => normCity(c.name) === norm) || null;
+  } catch {
+    return null;
+  }
+}

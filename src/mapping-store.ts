@@ -1,5 +1,6 @@
 import { query } from "./db.js";
 import { searchKoterRefnets as searchKoterLive, KoterRefnetResult } from "./koter-client.js";
+import { getKoterCitiesByState, KoterCity } from "./koter-cities.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -381,12 +382,35 @@ export async function autoMatchProviders(
 ): Promise<AutoMatchResult[]> {
   const results: AutoMatchResult[] = [];
 
+  // Pre-cache Koter cities per estado (1 MCP call per unique state, not per provider)
+  const cityCache = new Map<string, KoterCity[]>();
+
   for (const p of providers) {
     const existing = await getMappingByKey(p.nome, p.cidade);
     if (existing) continue;
 
     try {
-      const { refnets } = await searchKoterLive(p.nome, p.estado, 1, 5);
+      // Resolve Amil city → Koter cityId
+      const estadoKey = p.estado.toUpperCase().trim();
+      if (!cityCache.has(estadoKey)) {
+        try {
+          cityCache.set(estadoKey, await getKoterCitiesByState(p.estado));
+        } catch {
+          cityCache.set(estadoKey, []);
+        }
+      }
+      const cities = cityCache.get(estadoKey)!;
+      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+      const koterCity = cities.find(c => normCity(c.name) === normCity(p.cidade));
+
+      if (!koterCity) {
+        // City not found in Koter - cannot match safely
+        results.push({ amilNome: p.nome, amilCidade: p.cidade, bestMatch: null, confidence: 0 });
+        continue;
+      }
+
+      // Search Koter refnets filtered by cityId (not just state)
+      const { refnets } = await searchKoterLive(p.nome, p.estado, 1, 5, koterCity.id);
 
       if (refnets.length > 0) {
         const best = refnets[0];
@@ -421,27 +445,25 @@ function normalizeName(name: string): string {
 }
 
 function computeConfidence(amilNome: string, amilCidade: string, koterRefnet: KoterRefnetResult): number {
+  // City MUST match - hard requirement (safety net in case API returns wrong city)
+  const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  if (normCity(amilCidade) !== normCity(koterRefnet.cityName || "")) {
+    return 0; // Wrong city = no match
+  }
+
+  // Name similarity scoring
   const na = normalizeName(amilNome);
   const nb = normalizeName(koterRefnet.name);
 
-  let score = 0;
-  if (na === nb) score = 1;
-  else if (na.includes(nb) || nb.includes(na)) score = 0.85;
-  else {
-    const tokensA = na.split(/\s+/);
-    const tokensB = nb.split(/\s+/);
-    const matches = tokensA.filter((t) =>
-      tokensB.some((bt) => bt === t || bt.includes(t) || t.includes(bt))
-    );
-    score = matches.length / Math.max(tokensA.length, tokensB.length);
-  }
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.85;
 
-  const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-  if (normCity(amilCidade) === normCity(koterRefnet.cityName || "")) {
-    score = Math.min(1, score + 0.15);
-  }
-
-  return score;
+  const tokensA = na.split(/\s+/);
+  const tokensB = nb.split(/\s+/);
+  const matches = tokensA.filter((t) =>
+    tokensB.some((bt) => bt === t || bt.includes(t) || t.includes(bt))
+  );
+  return matches.length / Math.max(tokensA.length, tokensB.length);
 }
 
 // ─── Export for Koter ────────────────────────────────────────────────────────

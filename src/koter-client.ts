@@ -97,10 +97,13 @@ export async function searchKoterRefnets(
   query: string,
   stateName?: string,
   page = 1,
-  pageSize = 20
+  pageSize = 20,
+  cityId?: string
 ): Promise<{ refnets: KoterRefnetResult[]; total: number }> {
   const args: Record<string, any> = { name: query, page, pageSize };
-  if (stateName) {
+  if (cityId) {
+    args.cityId = cityId;
+  } else if (stateName) {
     const stateId = await resolveStateId(stateName);
     if (stateId) args.stateId = stateId;
   }
