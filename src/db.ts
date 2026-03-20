@@ -1,13 +1,5 @@
 import pg from "pg";
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  "postgres://amilpostgress:Gaminha1@16516156106216121121@koter_amil-postgress:5432/amil-postgress?sslmode=disable";
-
-// For local dev, use external port
-const LOCAL_DATABASE_URL =
-  "postgres://amilpostgress:Gaminha1@16516156106216121121@147.93.33.67:5433/amil-postgress?sslmode=disable";
-
 let pool: pg.Pool;
 
 export function getPool(): pg.Pool {
@@ -21,7 +13,8 @@ export async function query(text: string, params?: any[]): Promise<pg.QueryResul
 }
 
 export async function initDb(): Promise<void> {
-  const connStr = process.env.DATABASE_URL || (process.env.NODE_ENV === "production" ? DATABASE_URL : LOCAL_DATABASE_URL);
+  const connStr = process.env.DATABASE_URL;
+  if (!connStr) throw new Error("DATABASE_URL environment variable is required");
 
   pool = new pg.Pool({
     connectionString: connStr,

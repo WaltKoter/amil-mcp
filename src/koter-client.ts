@@ -1,9 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const KOTER_MCP_URL =
-  process.env.KOTER_MCP_URL ||
-  "https://api.koter.app/mcp/networks/legacy?apiKey=MhuVw8HA/Zf2FrGV01Qho5UeIei73k4qpyjhBjASU/hlLrzeJmCs5hvN0P9A3pLxKDo/HeRGWk7boKfy3vPjJA==";
+function getKoterMcpUrl(): string {
+  const url = process.env.KOTER_MCP_URL;
+  if (!url) throw new Error("KOTER_MCP_URL environment variable is required");
+  return url;
+}
 
 let client: Client | null = null;
 
@@ -19,7 +21,7 @@ async function getClient(): Promise<Client> {
   if (client) return client;
 
   const c = new Client({ name: "amil-mcp-koter-client", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(KOTER_MCP_URL));
+  const transport = new StreamableHTTPClientTransport(new URL(getKoterMcpUrl()));
   await c.connect(transport);
   client = c;
   return client;
