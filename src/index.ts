@@ -643,11 +643,11 @@ async function main() {
         return;
       }
 
-      // 2. Collect unique categorias and fetch refnet IDs for each
-      const uniqueCats = [...new Set(plans.map(p => p.categoria))];
+      // 2. Collect unique categorias (with plan names) and fetch refnet IDs
+      const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
       const refnetMap: Record<string, string[]> = {};
-      await Promise.all(uniqueCats.map(async (cat) => {
-        refnetMap[cat] = await getRefnetIdsByCategoria(cat);
+      await Promise.all(catKeys.map(async ([cat, planName]) => {
+        refnetMap[cat] = await getRefnetIdsByCategoria(cat, planName);
       }));
 
       // 3. Pre-compute nacional city IDs (filtered to non-null)

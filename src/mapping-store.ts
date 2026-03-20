@@ -172,16 +172,75 @@ export async function getProviderStats(filters?: { estado?: string; tipoRede?: s
 
 export async function getRefnetIdsByCategoria(
   categoria: string,
+  planName?: string,
   tipoRede = "Hospitais"
 ): Promise<string[]> {
-  const result = await query(
+  console.log(`[RefnetByCategoria] Searching for categoria="${categoria}" planName="${planName}" tipoRede="${tipoRede}"`);
+
+  // First, log what categories actually exist in DB for debugging
+  const sampleCats = await query(
+    `SELECT DISTINCT p.categorias FROM all_providers p
+     INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+     WHERE p.tipo_rede = $1 LIMIT 5`,
+    [tipoRede]
+  );
+  if (sampleCats.rows.length > 0) {
+    console.log(`[RefnetByCategoria] Sample categorias in DB:`, sampleCats.rows.map((r: any) => r.categorias));
+  } else {
+    console.log(`[RefnetByCategoria] No mapped providers found in DB for tipoRede=${tipoRede}`);
+  }
+
+  // Use ILIKE for case-insensitive matching and try multiple strategies
+  // 1. Exact category match (case-insensitive)
+  let result = await query(
     `SELECT DISTINCT m.koter_refnet_id
      FROM all_providers p
      INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
-     WHERE p.categorias LIKE $1 AND p.tipo_rede = $2`,
-    [`%"${categoria}"%`, tipoRede]
+     WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
+    [`%${categoria.toLowerCase()}%`, tipoRede]
   );
-  return result.rows.map((r: any) => r.koter_refnet_id);
+
+  if (result.rows.length > 0) {
+    return result.rows.map((r: any) => r.koter_refnet_id);
+  }
+
+  // 2. Try with plan name parts - extract key words from plan name
+  // e.g. "AMIL PRATA QC" -> try matching "PRATA"
+  if (planName) {
+    const keywords = planName.toUpperCase()
+      .replace(/^AMIL\s+/i, "")
+      .replace(/\s+(QC|QP|R|N|COPART|COPARTICIPACAO)\b/gi, "")
+      .trim();
+    if (keywords && keywords !== categoria.toUpperCase()) {
+      result = await query(
+        `SELECT DISTINCT m.koter_refnet_id
+         FROM all_providers p
+         INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+         WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
+        [`%${keywords.toLowerCase()}%`, tipoRede]
+      );
+      if (result.rows.length > 0) {
+        return result.rows.map((r: any) => r.koter_refnet_id);
+      }
+    }
+  }
+
+  // 3. Try matching any of the individual words from categoria
+  const words = categoria.split(/\s+/).filter(w => w.length >= 3);
+  for (const word of words) {
+    result = await query(
+      `SELECT DISTINCT m.koter_refnet_id
+       FROM all_providers p
+       INNER JOIN mappings m ON p.nome = m.amil_nome AND p.cidade = m.amil_cidade
+       WHERE LOWER(p.categorias) ILIKE $1 AND p.tipo_rede = $2`,
+      [`%${word.toLowerCase()}%`, tipoRede]
+    );
+    if (result.rows.length > 0) {
+      return result.rows.map((r: any) => r.koter_refnet_id);
+    }
+  }
+
+  return [];
 }
 
 export async function clearAllProviders(tipoRede?: string): Promise<void> {

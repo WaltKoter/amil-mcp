@@ -511,9 +511,9 @@ export function registerTools(server: McpServer) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ filtros: { linha, estado, numero_vidas, compulsoriedade, coparticipacao }, planos: [] }, null, 2) }] };
       }
 
-      const uniqueCats = [...new Set(plans.map(p => p.categoria))];
+      const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
       const refnetMap: Record<string, string[]> = {};
-      await Promise.all(uniqueCats.map(async (cat) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat); }));
+      await Promise.all(catKeys.map(async ([cat, planName]) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat, planName); }));
 
       const nacionalCityIds = comercializacao.produtos_nacionais.filter((c: any) => c.koterCityId).map((c: any) => c.koterCityId);
       const normMatch = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
