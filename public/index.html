@@ -361,6 +361,7 @@
     <div class="tab active" data-panel="prices">Tabela de Precos</div>
     <div class="tab" data-panel="network">Rede de Prestadores</div>
     <div class="tab" data-panel="mapping">Mapeamento Koter</div>
+    <div class="tab" data-panel="comercializacao">Comercialização</div>
   </div>
 
   <div class="container">
@@ -506,6 +507,42 @@
         <span id="map-page-info" style="font-size:13px;color:var(--text-light)"></span>
         <button class="btn-sm btn-save" id="map-next" style="padding:8px 16px">Próxima</button>
       </div>
+    </div>
+
+    <!-- ─── COMERCIALIZAÇÃO PANEL ─────────────────────────────────────── -->
+    <div class="panel" id="panel-comercializacao">
+      <div class="form-card">
+        <h2>Regiões de Comercialização (Manual de Vendas PME)</h2>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:16px">Dados extraídos do PDF do Manual de Vendas. Selecione um estado para ver os municípios de comercialização e seus IDs no Koter.</p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Estado</label>
+            <select id="comerc-estado">
+              <option value="">Selecione</option>
+              <option value="SP">São Paulo</option>
+              <option value="RJ">Rio de Janeiro</option>
+              <option value="MG">Minas Gerais</option>
+              <option value="PR">Paraná</option>
+              <option value="RS">Rio Grande do Sul</option>
+              <option value="SC">Santa Catarina</option>
+              <option value="BA">Bahia</option>
+              <option value="CE">Ceará</option>
+              <option value="DF">Distrito Federal</option>
+              <option value="GO">Goiás</option>
+              <option value="PE">Pernambuco</option>
+              <option value="ES">Espírito Santo</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn" id="btn-comerc-search" style="margin-top:12px">Buscar Comercialização</button>
+      </div>
+
+      <div class="loading" id="comerc-loading">
+        <div class="spinner"></div>
+        <div>Baixando e analisando PDF do Manual de Vendas...</div>
+      </div>
+
+      <div id="comerc-results"></div>
     </div>
   </div>
 
@@ -1438,7 +1475,7 @@
       const estado = document.getElementById('map-estado').value;
       const tipoRede = document.getElementById('map-tipo-rede').value;
 
-      // Get all mapped providers
+      // Get all mapped providers with their categorias
       let allMapped = [];
       let pg = 1;
       while (true) {
@@ -1453,13 +1490,16 @@
 
       if (!allMapped.length) { alert('Nenhum mapeado.'); return; }
 
-      const productNames = prompt('Nomes dos produtos (separados por virgula):\nEx: OURO QC R COPART, OURO QP R COPART');
-      if (!productNames) return;
+      // Collect unique categorias for preview
+      const allCats = new Set();
+      allMapped.forEach(p => (p.categorias || []).forEach(c => allCats.add(c)));
+      const catList = [...allCats].sort();
+
+      if (!confirm(`Exportar ${allMapped.length} redes mapeadas agrupadas por categoria Amil?\n\nCategorias encontradas:\n${catList.join('\n')}`)) return;
 
       try {
         const result = await api.post('/api/mappings/export-refnets', {
-          providers: allMapped.map(p => ({ nome: p.nome, cidade: p.cidade })),
-          productNames: productNames.split(',').map(s => s.trim()).filter(Boolean),
+          providers: allMapped.map(p => ({ nome: p.nome, cidade: p.cidade, categorias: p.categorias || [], linhas: p.linhas || [] })),
         });
         downloadJson(result, 'koter-refnets-import.json');
       } catch (err) { alert('Erro: ' + err.message); }
@@ -1584,6 +1624,128 @@
     });
     document.getElementById('map-prev').addEventListener('click', () => { mapPage--; loadMapProviders(); });
     document.getElementById('map-next').addEventListener('click', () => { mapPage++; loadMapProviders(); });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ─── COMERCIALIZAÇÃO TAB ─────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════
+
+    document.getElementById('btn-comerc-search').addEventListener('click', async () => {
+      const estado = document.getElementById('comerc-estado').value;
+      if (!estado) { alert('Selecione um estado'); return; }
+
+      const btn = document.getElementById('btn-comerc-search');
+      const loading = document.getElementById('comerc-loading');
+      const resultsDiv = document.getElementById('comerc-results');
+
+      btn.disabled = true;
+      loading.classList.add('active');
+      resultsDiv.innerHTML = '';
+
+      try {
+        const data = await api.get('/api/comercializacao?estado=' + encodeURIComponent(estado));
+        renderComercializacao(data, estado);
+      } catch (err) {
+        resultsDiv.innerHTML = `<div class="form-card" style="color:#e74c3c">Erro: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        loading.classList.remove('active');
+      }
+    });
+
+    function renderComercializacao(data, estado) {
+      const container = document.getElementById('comerc-results');
+      let html = '';
+
+      // Stats
+      const totalRegional = data.produtos_regionais.reduce((s, p) => s + p.cidades.length, 0);
+      const totalNacional = data.produtos_nacionais.length;
+      const matchedRegional = data.produtos_regionais.reduce((s, p) => s + p.cidades.filter(c => c.koterCityId).length, 0);
+      const matchedNacional = data.produtos_nacionais.filter(c => c.koterCityId).length;
+
+      html += `<div class="form-card" style="margin-bottom:16px">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+          <span class="status-badge status-mapped">${matchedRegional + matchedNacional} cidades com ID Koter</span>
+          <span class="status-badge status-pending">${(totalRegional - matchedRegional) + (totalNacional - matchedNacional)} sem ID</span>
+          <span style="color:var(--text-light);font-size:13px">${totalRegional + totalNacional} total</span>
+          <button class="btn" style="margin-left:auto;font-size:13px;padding:8px 16px;background:var(--accent)" onclick="exportComercializacao()">Exportar JSON Koter</button>
+        </div>
+      </div>`;
+
+      // Regional products
+      if (data.produtos_regionais.length) {
+        html += '<div class="results-card" style="margin-bottom:16px">';
+        html += '<div class="results-header"><span>Produtos Regionais</span></div>';
+        for (const prod of data.produtos_regionais) {
+          const matched = prod.cidades.filter(c => c.koterCityId).length;
+          html += `<div style="padding:16px 24px;border-bottom:1px solid var(--border)">`;
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">`;
+          html += `<strong style="font-size:15px;color:var(--primary)">${prod.produto}</strong>`;
+          html += `<span style="font-size:12px;color:var(--text-light)">${matched}/${prod.cidades.length} cidades no Koter</span>`;
+          html += `</div>`;
+          html += `<div style="display:flex;flex-wrap:wrap;gap:6px">`;
+          for (const c of prod.cidades) {
+            const color = c.koterCityId ? '#27ae60' : '#e74c3c';
+            const icon = c.koterCityId ? '✓' : '✗';
+            const title = c.koterCityId ? 'ID: ' + c.koterCityId : 'Não encontrada no Koter';
+            html += `<span style="padding:4px 10px;border-radius:12px;font-size:12px;border:1px solid ${color}33;background:${color}11;color:${color}" title="${title}">${icon} ${c.nome}</span>`;
+          }
+          html += `</div></div>`;
+        }
+        html += '</div>';
+      }
+
+      // National products
+      if (data.produtos_nacionais.length) {
+        const matched = data.produtos_nacionais.filter(c => c.koterCityId).length;
+        html += '<div class="results-card">';
+        html += `<div class="results-header"><span>Produtos Nacionais — ${estado} (${matched}/${data.produtos_nacionais.length} no Koter)</span></div>`;
+        html += `<div style="padding:16px 24px">`;
+        html += `<div style="display:flex;flex-wrap:wrap;gap:6px">`;
+        for (const c of data.produtos_nacionais) {
+          const color = c.koterCityId ? '#27ae60' : '#e74c3c';
+          const icon = c.koterCityId ? '✓' : '✗';
+          const title = c.koterCityId ? 'ID: ' + c.koterCityId : 'Não encontrada no Koter';
+          html += `<span style="padding:4px 10px;border-radius:12px;font-size:12px;border:1px solid ${color}33;background:${color}11;color:${color}" title="${title}">${icon} ${c.nome}</span>`;
+        }
+        html += `</div></div></div>`;
+      }
+
+      if (!data.produtos_regionais.length && !data.produtos_nacionais.length) {
+        html += `<div class="form-card" style="text-align:center;padding:48px"><p style="color:var(--text-light)">Nenhum dado de comercialização encontrado para este estado.</p></div>`;
+      }
+
+      container.innerHTML = html;
+      // Store for export
+      window._lastComercData = data;
+      window._lastComercEstado = estado;
+    }
+
+    async function exportComercializacao() {
+      const data = window._lastComercData;
+      const estado = window._lastComercEstado;
+      if (!data) return;
+
+      // Collect all matched city IDs grouped by product
+      const result = {};
+
+      // Regional products - each is its own product
+      for (const prod of data.produtos_regionais) {
+        const cityIds = prod.cidades.filter(c => c.koterCityId).map(c => c.koterCityId);
+        if (cityIds.length) {
+          result[prod.produto] = { externalApiProductIds: [], productNames: [prod.produto], cityIds };
+        }
+      }
+
+      // National products
+      if (data.produtos_nacionais.length) {
+        const cityIds = data.produtos_nacionais.filter(c => c.koterCityId).map(c => c.koterCityId);
+        if (cityIds.length) {
+          result['Nacional - ' + estado] = { externalApiProductIds: [], productNames: ['Nacional'], cityIds };
+        }
+      }
+
+      downloadJson(result, `koter-comercializacao-${estado.toLowerCase()}.json`);
+    }
 
     // ─── Init ──────────────────────────────────────────────────────────────
     initPriceForm();

@@ -399,12 +399,12 @@ async function main() {
     try {
       const { providers, productNames } = req.body;
       if (!Array.isArray(providers)) {
-        res.status(400).json({ error: "Body deve conter { providers, productNames }" });
+        res.status(400).json({ error: "Body deve conter { providers: [...] }" });
         return;
       }
       const result = await exportRefnetsForKoter(
         providers,
-        productNames || []
+        productNames && productNames.length > 0 ? productNames : undefined
       );
       res.json(result);
     } catch (err: any) {

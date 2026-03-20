@@ -433,10 +433,10 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "amil_export_refnets_for_koter",
-    "Exporta os IDs das redes referenciadas mapeadas no formato de importação do Koter. Retorna { externalApiProductIds: [], productNames: [...], refnetIds: [...] }.",
+    "Exporta os IDs das redes referenciadas mapeadas no formato de importação do Koter, agrupados por categoria Amil. Retorna { [categoria]: { externalApiProductIds: [], productNames: [...], refnetIds: [...] } }.",
     {
       estado: z.string().optional().describe("Filtrar mapeamentos por estado"),
-      productNames: z.array(z.string()).describe("Nomes dos produtos no Koter para vincular as redes"),
+      productNames: z.array(z.string()).optional().describe("Nomes dos produtos (opcional, usa categorias Amil se omitido)"),
     },
     async (params) => {
       const mappings = await getAllMappings(params.estado);

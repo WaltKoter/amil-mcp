@@ -349,22 +349,47 @@ export interface KoterRefnetExport {
   refnetIds: string[];
 }
 
+export interface GroupedRefnetExport {
+  [categoria: string]: KoterRefnetExport;
+}
+
 export async function exportRefnetsForKoter(
-  providers: Array<{ nome: string; cidade: string }>,
-  productNames: string[]
-): Promise<KoterRefnetExport> {
-  const refnetIds: string[] = [];
-  const seen = new Set<string>();
+  providers: Array<{ nome: string; cidade: string; categorias?: string[]; linhas?: string[] }>,
+  productNames?: string[]
+): Promise<GroupedRefnetExport> {
+  // Group providers by their categorias (Amil product names)
+  const groups: Record<string, Set<string>> = {};
 
   for (const p of providers) {
     const mapping = await getMappingByKey(p.nome, p.cidade);
-    if (mapping && !seen.has(mapping.koterRefnetId)) {
-      refnetIds.push(mapping.koterRefnetId);
-      seen.add(mapping.koterRefnetId);
+    if (!mapping) continue;
+
+    const cats = p.categorias && p.categorias.length > 0 ? p.categorias : ["Sem Categoria"];
+    for (const cat of cats) {
+      if (!groups[cat]) groups[cat] = new Set();
+      groups[cat].add(mapping.koterRefnetId);
     }
   }
 
-  return { externalApiProductIds: [], productNames, refnetIds };
+  // If manual productNames provided, merge all refnets into one group per name
+  if (productNames && productNames.length > 0) {
+    const allRefnets = new Set<string>();
+    for (const set of Object.values(groups)) {
+      for (const id of set) allRefnets.add(id);
+    }
+    const result: GroupedRefnetExport = {};
+    for (const name of productNames) {
+      result[name] = { externalApiProductIds: [], productNames: [name], refnetIds: [...allRefnets] };
+    }
+    return result;
+  }
+
+  // Auto-grouped by Amil category
+  const result: GroupedRefnetExport = {};
+  for (const [cat, ids] of Object.entries(groups)) {
+    result[cat] = { externalApiProductIds: [], productNames: [cat], refnetIds: [...ids] };
+  }
+  return result;
 }
 
 export interface KoterCityExport {
