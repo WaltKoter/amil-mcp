@@ -11,6 +11,8 @@ import {
   getProviders,
   getStates,
   getFormOptions,
+  getSubColumnIndex,
+  getNumSubColumns,
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
@@ -31,6 +33,7 @@ import {
   getProviderStats,
   clearAllProviders,
   getRefnetIdsByCategoria,
+  getRefnetIdsByProviders,
   type AllProvider,
 } from "./mapping-store.js";
 import {
@@ -623,8 +626,8 @@ async function main() {
       const regiao = ESTADO_TO_REGIAO[estado] || ESTADO_TO_REGIAO[estado.toUpperCase()] || "Sudeste";
       const linhaInfo = ALL_LINHAS.find(l => l.id === linha);
 
-      // 1. Fetch price table + comercialização in parallel
-      const [plans, comercializacao] = await Promise.all([
+      // 1. Fetch price table + comercialização + providers in parallel
+      const [plans, comercializacao, providerData] = await Promise.all([
         getPriceTable({ estado, numero_vidas, compulsoriedade, coparticipacao, linha }),
         (async () => {
           if (!uf) return { produtos_regionais: [], produtos_nacionais: [] };
@@ -636,6 +639,7 @@ async function main() {
             return { produtos_regionais: [], produtos_nacionais: [] };
           }
         })(),
+        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
       ]);
 
       if (!plans || plans.length === 0) {
@@ -643,12 +647,70 @@ async function main() {
         return;
       }
 
-      // 2. Collect unique categorias (with plan names) and fetch refnet IDs
-      const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
-      const refnetMap: Record<string, string[]> = {};
-      await Promise.all(catKeys.map(async ([cat, planName]) => {
-        refnetMap[cat] = await getRefnetIdsByCategoria(cat, estado, planName);
-      }));
+      // 2. Determine sub-column count per category and map providers per plan
+      const subColCounts = getNumSubColumns(providerData);
+      console.log("[Super Route] Sub-column counts:", JSON.stringify(subColCounts));
+
+      // Group plans by category (lowercase key for matching API response)
+      const plansByCategory: Record<string, typeof plans> = {};
+      for (const p of plans) {
+        const catKey = p.categoria;
+        if (!plansByCategory[catKey]) plansByCategory[catKey] = [];
+        plansByCategory[catKey].push(p);
+      }
+
+      // Match price table categories to provider data categories (case-insensitive)
+      const catApiKeyMap: Record<string, string> = {};
+      for (const priceCat of Object.keys(plansByCategory)) {
+        const normPriceCat = priceCat.toLowerCase();
+        const apiKey = Object.keys(providerData).find(k => k.toLowerCase() === normPriceCat);
+        if (apiKey) catApiKeyMap[priceCat] = apiKey;
+      }
+
+      // For each plan, filter providers that accept it and get their refnet IDs
+      const planRefnetMap: Record<string, string[]> = {};
+      const refnetPromises: Promise<void>[] = [];
+
+      for (const plan of plans) {
+        const planKey = `${plan.nome}|${plan.tipo_acomodacao}`;
+        if (planRefnetMap[planKey]) continue; // already computed for this plan+acom combo
+
+        const apiCatKey = catApiKeyMap[plan.categoria];
+        const allProviders = apiCatKey ? (providerData[apiCatKey] || []) : [];
+        const numSubCols = apiCatKey ? (subColCounts[apiCatKey] || 1) : 1;
+
+        let filteredProviders: Array<{ nome: string; cidade: string }>;
+
+        if (numSubCols <= 1) {
+          // Single sub-column: all providers in the category accept this plan
+          filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
+        } else {
+          // Multiple sub-columns: determine which one this plan maps to
+          const plansInCat = plansByCategory[plan.categoria] || [];
+          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
+          console.log(`[Super Route] Plan "${plan.nome}" (${plan.tipo_acomodacao}) → subCol ${subColIdx} of ${numSubCols}`);
+
+          filteredProviders = allProviders
+            .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
+            .map(p => ({ nome: p.nome, cidade: p.cidade }));
+        }
+
+        console.log(`[Super Route] Plan "${plan.nome}" → ${filteredProviders.length} providers (of ${allProviders.length} total)`);
+
+        // Look up refnet IDs for these specific providers
+        const promise = (async () => {
+          if (filteredProviders.length === 0) {
+            planRefnetMap[planKey] = [];
+            return;
+          }
+          // Try provider-specific lookup first, fall back to category-based
+          const ids = await getRefnetIdsByProviders(filteredProviders, estado);
+          planRefnetMap[planKey] = ids;
+        })();
+        refnetPromises.push(promise);
+      }
+
+      await Promise.all(refnetPromises);
 
       // 3. Pre-compute nacional city IDs (filtered to non-null)
       const nacionalCityIds = comercializacao.produtos_nacionais
@@ -660,6 +722,8 @@ async function main() {
 
       // 5. Build enriched plans
       const planos = plans.map(plan => {
+        const planKey = `${plan.nome}|${plan.tipo_acomodacao}`;
+
         // Match plan's categoria to a regional product from comercializacao
         const catNorm = normMatch(plan.categoria);
         const regionalMatch = comercializacao.produtos_regionais.find(rp =>
@@ -711,7 +775,7 @@ async function main() {
             cidade_ids: cidadeIds,
           },
           redes_referenciadas: {
-            refnet_ids: refnetMap[plan.categoria] || [],
+            refnet_ids: planRefnetMap[planKey] || [],
           },
         };
       });

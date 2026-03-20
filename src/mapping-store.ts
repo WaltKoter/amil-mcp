@@ -241,6 +241,38 @@ export async function getRefnetIdsByCategoria(
   return [];
 }
 
+/**
+ * Get Koter refnet IDs for a specific list of providers (by nome+cidade).
+ * Used by the super route to filter refnets per plan based on sub-column acceptance.
+ */
+export async function getRefnetIdsByProviders(
+  providers: Array<{ nome: string; cidade: string }>,
+  estado?: string,
+  tipoRede = "Hospitais"
+): Promise<string[]> {
+  if (providers.length === 0) return [];
+
+  // Build a query that matches any of the given provider name+city pairs
+  const conditions: string[] = [];
+  const params: any[] = [];
+  let idx = 1;
+
+  for (const p of providers) {
+    conditions.push(`(m.amil_nome = $${idx} AND m.amil_cidade = $${idx + 1})`);
+    params.push(p.nome, p.cidade);
+    idx += 2;
+  }
+
+  const result = await query(
+    `SELECT DISTINCT m.koter_refnet_id
+     FROM mappings m
+     WHERE (${conditions.join(" OR ")})`,
+    params
+  );
+
+  return result.rows.map((r: any) => r.koter_refnet_id);
+}
+
 export async function clearAllProviders(tipoRede?: string): Promise<void> {
   if (tipoRede) {
     await query(`DELETE FROM all_providers WHERE tipo_rede = $1`, [tipoRede]);

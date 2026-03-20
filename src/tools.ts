@@ -5,6 +5,8 @@ import {
   getProviders,
   getStates,
   getFormOptions,
+  getSubColumnIndex,
+  getNumSubColumns,
   ALL_LINHAS,
   REGIOES,
 } from "./amil-client.js";
@@ -17,6 +19,7 @@ import {
   getAllMappings,
   exportRefnetsForKoter,
   getRefnetIdsByCategoria,
+  getRefnetIdsByProviders,
 } from "./mapping-store.js";
 
 export function registerTools(server: McpServer) {
@@ -492,9 +495,10 @@ export function registerTools(server: McpServer) {
       const { linha, estado, numero_vidas, compulsoriedade, coparticipacao } = params;
 
       const uf = estadoToUF(estado);
+      const regiao = ESTADO_TO_REGIAO[estado] || ESTADO_TO_REGIAO[estado.toUpperCase()] || "Sudeste";
       const linhaInfo = ALL_LINHAS.find(l => l.id === linha);
 
-      const [plans, comercializacao] = await Promise.all([
+      const [plans, comercializacao, providerData] = await Promise.all([
         getPriceTable({ estado, numero_vidas, compulsoriedade, coparticipacao, linha }),
         (async () => {
           if (!uf) return { produtos_regionais: [] as any[], produtos_nacionais: [] as any[] };
@@ -505,20 +509,62 @@ export function registerTools(server: McpServer) {
             return { produtos_regionais: [] as any[], produtos_nacionais: [] as any[] };
           }
         })(),
+        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
       ]);
 
       if (!plans || plans.length === 0) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ filtros: { linha, estado, numero_vidas, compulsoriedade, coparticipacao }, planos: [] }, null, 2) }] };
       }
 
-      const catKeys = [...new Map(plans.map(p => [p.categoria, p.nome])).entries()];
-      const refnetMap: Record<string, string[]> = {};
-      await Promise.all(catKeys.map(async ([cat, planName]) => { refnetMap[cat] = await getRefnetIdsByCategoria(cat, estado, planName); }));
+      // Sub-column mapping
+      const subColCounts = getNumSubColumns(providerData);
+      const plansByCategory: Record<string, typeof plans> = {};
+      for (const p of plans) {
+        if (!plansByCategory[p.categoria]) plansByCategory[p.categoria] = [];
+        plansByCategory[p.categoria].push(p);
+      }
+      const catApiKeyMap: Record<string, string> = {};
+      for (const priceCat of Object.keys(plansByCategory)) {
+        const apiKey = Object.keys(providerData).find(k => k.toLowerCase() === priceCat.toLowerCase());
+        if (apiKey) catApiKeyMap[priceCat] = apiKey;
+      }
+
+      // Get refnet IDs per plan (filtered by sub-column acceptance)
+      const planRefnetMap: Record<string, string[]> = {};
+      const promises: Promise<void>[] = [];
+      for (const plan of plans) {
+        const planKey = `${plan.nome}|${plan.tipo_acomodacao}`;
+        if (planRefnetMap[planKey] !== undefined) continue;
+        planRefnetMap[planKey] = []; // placeholder
+
+        const apiCatKey = catApiKeyMap[plan.categoria];
+        const allProviders = apiCatKey ? (providerData[apiCatKey] || []) : [];
+        const numSubCols = apiCatKey ? (subColCounts[apiCatKey] || 1) : 1;
+
+        let filteredProviders: Array<{ nome: string; cidade: string }>;
+        if (numSubCols <= 1) {
+          filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
+        } else {
+          const plansInCat = plansByCategory[plan.categoria] || [];
+          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
+          filteredProviders = allProviders
+            .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
+            .map(p => ({ nome: p.nome, cidade: p.cidade }));
+        }
+
+        promises.push((async () => {
+          planRefnetMap[planKey] = filteredProviders.length > 0
+            ? await getRefnetIdsByProviders(filteredProviders, estado)
+            : [];
+        })());
+      }
+      await Promise.all(promises);
 
       const nacionalCityIds = comercializacao.produtos_nacionais.filter((c: any) => c.koterCityId).map((c: any) => c.koterCityId);
       const normMatch = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
 
       const planos = plans.map(plan => {
+        const planKey = `${plan.nome}|${plan.tipo_acomodacao}`;
         const catNorm = normMatch(plan.categoria);
         const regionalMatch = comercializacao.produtos_regionais.find((rp: any) => normMatch(rp.produto).includes(catNorm));
 
@@ -541,7 +587,7 @@ export function registerTools(server: McpServer) {
           faixa_54_58: plan.faixa_54_58, faixa_59_plus: plan.faixa_59_plus,
           abrangencia,
           area_comercializacao: { cidade_ids: cidadeIds },
-          redes_referenciadas: { refnet_ids: refnetMap[plan.categoria] || [] },
+          redes_referenciadas: { refnet_ids: planRefnetMap[planKey] || [] },
         };
       });
 

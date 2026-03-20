@@ -332,6 +332,88 @@ export async function getProviders(params: NetworkParams): Promise<Record<string
   return result;
 }
 
+// ─── Sub-column mapping: plan name → sub-column index ─────────────────────────
+
+/**
+ * Strip R-number suffix from plan name: "Amil S750 R1" → "Amil S750", "Platinum R1" → "Platinum"
+ */
+function stripRSuffix(name: string): string {
+  return name.replace(/\s+R\d+$/i, "").trim();
+}
+
+/**
+ * Determine which sub-column index a plan maps to within its category's provider data.
+ *
+ * Algorithm:
+ * 1. Get all plans in the same category
+ * 2. Extract unique base names (stripped of R-suffix) in order of first appearance
+ * 3. If unique count matches sub-column count → use stripped names
+ * 4. If not → use full unique names (each plan name = unique sub-column)
+ * 5. Return the index of the matching base name
+ */
+export function getSubColumnIndex(
+  planName: string,
+  allPlansInCategory: PricePlan[],
+  numSubColumns: number
+): number {
+  if (numSubColumns <= 1) return 0;
+
+  // Get unique plan names in order of first appearance
+  const uniqueFullNames: string[] = [];
+  for (const p of allPlansInCategory) {
+    if (!uniqueFullNames.includes(p.nome)) uniqueFullNames.push(p.nome);
+  }
+
+  // Try stripped (without R-suffix) first
+  const uniqueStripped: string[] = [];
+  for (const p of allPlansInCategory) {
+    const stripped = stripRSuffix(p.nome);
+    if (!uniqueStripped.includes(stripped)) uniqueStripped.push(stripped);
+  }
+
+  if (uniqueStripped.length === numSubColumns) {
+    // Stripped names match sub-column count
+    const idx = uniqueStripped.indexOf(stripRSuffix(planName));
+    return idx >= 0 ? idx : 0;
+  }
+
+  if (uniqueFullNames.length === numSubColumns) {
+    // Full names match sub-column count
+    const idx = uniqueFullNames.indexOf(planName);
+    return idx >= 0 ? idx : 0;
+  }
+
+  // Fallback: try stripped match even if counts don't align perfectly
+  const stripped = stripRSuffix(planName);
+  const idx = uniqueStripped.indexOf(stripped);
+  return idx >= 0 ? Math.min(idx, numSubColumns - 1) : 0;
+}
+
+/**
+ * Get the number of sub-columns for a category based on provider data.
+ * Counts columns between index 4 and the trailing "0".
+ */
+export function getNumSubColumns(providerData: Record<string, Provider[]>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [cat, providers] of Object.entries(providerData)) {
+    if (providers.length === 0) {
+      result[cat] = 1;
+      continue;
+    }
+    // Use the max sub_categorias_aceitas index + 1, or count from first provider
+    let maxIdx = 0;
+    for (const p of providers) {
+      if (p.sub_categorias_aceitas) {
+        for (const i of p.sub_categorias_aceitas) {
+          if (i > maxIdx) maxIdx = i;
+        }
+      }
+    }
+    result[cat] = maxIdx + 1;
+  }
+  return result;
+}
+
 // ─── Get form options for a given linha ──────────────────────────────────────
 
 export function getFormOptions(linha: string) {
