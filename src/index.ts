@@ -43,7 +43,7 @@ import {
   createKoterRefnet,
 } from "./koter-client.js";
 import { getComercializacaoByState, UF_TO_NAME } from "./manual-vendas.js";
-import { getKoterCitiesByState } from "./koter-cities.js";
+import { getKoterCitiesByState, resolveKoterCityId } from "./koter-cities.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -275,11 +275,8 @@ async function main() {
         return;
       }
 
-      // Resolve city to Koter cityId
-      const koterCities = await getKoterCitiesByState(amilEstado);
-      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-      const amilCityNorm = normCity(amilCidade);
-      const match = koterCities.find((c) => normCity(c.name) === amilCityNorm);
+      // Resolve city to Koter cityId (handles REGIÃO METROPOLITANA etc.)
+      const match = await resolveKoterCityId(amilCidade, amilEstado);
 
       if (!match) {
         res.status(404).json({ error: `Cidade "${amilCidade}" não encontrada no Koter para o estado "${amilEstado}"` });
@@ -348,10 +345,6 @@ async function main() {
 
       send({ type: "start", total: allUnmapped.length });
 
-      // Cache resolved cities per state to avoid repeated lookups
-      const cityCache: Record<string, Array<{ id: string; name: string }>> = {};
-      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-
       let created = 0, failed = 0, skipped = 0;
 
       for (let i = 0; i < allUnmapped.length; i++) {
@@ -359,18 +352,8 @@ async function main() {
         const p = allUnmapped[i];
 
         try {
-          // Resolve city
-          if (!cityCache[p.estado]) {
-            try {
-              cityCache[p.estado] = await getKoterCitiesByState(p.estado);
-            } catch {
-              cityCache[p.estado] = [];
-            }
-          }
-
-          const cities = cityCache[p.estado];
-          const amilCityNorm = normCity(p.cidade);
-          const cityMatch = cities.find((c) => normCity(c.name) === amilCityNorm);
+          // Resolve city (handles REGIÃO METROPOLITANA, state aliases, etc.)
+          const cityMatch = await resolveKoterCityId(p.cidade, p.estado);
 
           if (!cityMatch) {
             skipped++;
@@ -449,8 +432,6 @@ async function main() {
 
       send({ type: "start", total: allProviders.length });
 
-      // Cache Koter cities per state
-      const cityCache: Record<string, Array<{ id: string; name: string }>> = {};
       const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
 
       let matched = 0, notFound = 0, failed = 0;
@@ -460,17 +441,8 @@ async function main() {
         const p = allProviders[i];
 
         try {
-          // Resolve Koter city
-          if (!cityCache[p.estado]) {
-            try {
-              cityCache[p.estado] = await getKoterCitiesByState(p.estado);
-            } catch {
-              cityCache[p.estado] = [];
-            }
-          }
-
-          const cities = cityCache[p.estado];
-          const cityMatch = cities.find((c) => normCity(c.name) === normCity(p.cidade));
+          // Resolve Koter city (handles REGIÃO METROPOLITANA, state aliases, etc.)
+          const cityMatch = await resolveKoterCityId(p.cidade, p.estado);
 
           if (!cityMatch) {
             notFound++;

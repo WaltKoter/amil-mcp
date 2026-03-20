@@ -43,6 +43,60 @@ const AMIL_STATE_ALIASES: Record<string, string> = {
   "SANTA CATARINA": "Santa Catarina",
 };
 
+// Map "REGIÃO METROPOLITANA" and similar generic city names to the state capital
+const STATE_CAPITAL: Record<string, string> = {
+  "São Paulo": "São Paulo",
+  "Rio de Janeiro": "Rio de Janeiro",
+  "Bahia": "Salvador",
+  "Ceará": "Fortaleza",
+  "Distrito Federal": "Brasília",
+  "Goiás": "Goiânia",
+  "Maranhão": "São Luís",
+  "Minas Gerais": "Belo Horizonte",
+  "Paraíba": "João Pessoa",
+  "Paraná": "Curitiba",
+  "Pernambuco": "Recife",
+  "Rio Grande do Norte": "Natal",
+  "Rio Grande do Sul": "Porto Alegre",
+  "Santa Catarina": "Florianópolis",
+  "Espírito Santo": "Vitória",
+};
+
+// City names that are actually region descriptors, not real cities
+const GENERIC_CITY_NAMES = [
+  "REGIÃO METROPOLITANA",
+  "REGIAO METROPOLITANA",
+  "GRANDE",
+  "METROPOLITANA",
+];
+
+/**
+ * Normalize a generic Amil city name to a real city.
+ * "REGIÃO METROPOLITANA" → state capital, "GRANDE SÃO PAULO" → "São Paulo", etc.
+ */
+function resolveGenericCityName(cityName: string, stateName: string): string | null {
+  const upper = cityName.toUpperCase().trim();
+
+  // Exact match for generic names
+  if (GENERIC_CITY_NAMES.some(g => upper === g || upper.startsWith(g))) {
+    return STATE_CAPITAL[stateName] || null;
+  }
+
+  // "GRANDE SÃO PAULO" → "São Paulo", "GRANDE RIO" → "Rio de Janeiro"
+  if (upper.startsWith("GRANDE ")) {
+    const rest = upper.replace("GRANDE ", "").trim();
+    for (const [state, capital] of Object.entries(STATE_CAPITAL)) {
+      const normCapital = capital.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      if (normCapital.includes(rest) || rest.includes(normCapital.split(" ")[0])) {
+        return capital;
+      }
+    }
+    return STATE_CAPITAL[stateName] || null;
+  }
+
+  return null;
+}
+
 export async function getKoterCitiesByState(estadoQuery: string): Promise<KoterCity[]> {
   const upper = estadoQuery.toUpperCase().trim();
   const stateName = AMIL_STATE_ALIASES[upper] || UF_TO_NAME[upper] || estadoQuery;
@@ -93,7 +147,24 @@ export async function resolveKoterCityId(
   try {
     const cities = await getKoterCitiesByState(estadoQuery);
     const norm = normCity(amilCityName);
-    return cities.find((c) => normCity(c.name) === norm) || null;
+
+    // 1. Direct match
+    const direct = cities.find((c) => normCity(c.name) === norm);
+    if (direct) return direct;
+
+    // 2. Resolve generic city names (REGIÃO METROPOLITANA → capital)
+    const upper = estadoQuery.toUpperCase().trim();
+    const stateName = AMIL_STATE_ALIASES[upper] || UF_TO_NAME[upper] || estadoQuery;
+    const resolved = resolveGenericCityName(amilCityName, stateName);
+    if (resolved) {
+      const resolvedMatch = cities.find((c) => normCity(c.name) === normCity(resolved));
+      if (resolvedMatch) {
+        console.log(`[KoterCities] Resolved "${amilCityName}" → "${resolved}" (${stateName})`);
+        return resolvedMatch;
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
