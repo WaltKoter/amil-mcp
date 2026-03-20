@@ -891,6 +891,87 @@ async function main() {
     }
   });
 
+  // ─── Rota de redes por produto (lightweight) ─────────────────────────────────
+  app.post("/api/super-route/refnets", async (req, res) => {
+    try {
+      const { linha, estado } = req.body;
+      if (!linha || !estado) {
+        res.status(400).json({ error: "Campos obrigatórios: linha, estado" });
+        return;
+      }
+
+      const regiao = ESTADO_TO_REGIAO[estado] || ESTADO_TO_REGIAO[estado.toUpperCase()] || "Sudeste";
+
+      // 1. Fetch price table (minimal params - only need plan names) + providers
+      const [plans, providerData] = await Promise.all([
+        getPriceTable({ estado, numero_vidas: "2", compulsoriedade: "MEI", coparticipacao: "Com coparticipação30", linha }),
+        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
+      ]);
+
+      if (!plans || plans.length === 0) {
+        res.json({ produtos: [] });
+        return;
+      }
+
+      const subColCounts = getNumSubColumns(providerData);
+
+      const plansByCategory: Record<string, typeof plans> = {};
+      for (const p of plans) {
+        if (!plansByCategory[p.categoria]) plansByCategory[p.categoria] = [];
+        plansByCategory[p.categoria].push(p);
+      }
+
+      const catApiKeyMap = matchCategoryKeys(Object.keys(plansByCategory), Object.keys(providerData));
+
+      // Deduplicate by plan name + acomodação
+      const seen = new Set<string>();
+      const uniquePlans = plans.filter(p => {
+        const key = `${p.nome}|${p.tipo_acomodacao}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Resolve refnets per plan
+      const results: Array<{ nome: string; tipo_acomodacao: string; refnet_ids: string[] }> = [];
+      const promises: Promise<void>[] = [];
+
+      for (const plan of uniquePlans) {
+        const apiCatKey = catApiKeyMap[plan.categoria];
+        const allProviders = apiCatKey ? (providerData[apiCatKey] || []) : [];
+        const numSubCols = apiCatKey ? (subColCounts[apiCatKey] || 1) : 1;
+
+        let filteredProviders: Array<{ nome: string; cidade: string }>;
+
+        if (numSubCols <= 1) {
+          filteredProviders = allProviders.map(p => ({ nome: p.nome, cidade: p.cidade }));
+        } else {
+          const plansInCat = plansByCategory[plan.categoria] || [];
+          const subColIdx = getSubColumnIndex(plan.nome, plansInCat, numSubCols);
+          filteredProviders = allProviders
+            .filter(p => p.sub_categorias_aceitas?.includes(subColIdx) ?? true)
+            .map(p => ({ nome: p.nome, cidade: p.cidade }));
+        }
+
+        const entry = { nome: plan.nome, tipo_acomodacao: plan.tipo_acomodacao, refnet_ids: [] as string[] };
+        results.push(entry);
+
+        if (filteredProviders.length > 0) {
+          promises.push(
+            getRefnetIdsByProviders(filteredProviders, estado).then(ids => { entry.refnet_ids = ids; })
+          );
+        }
+      }
+
+      await Promise.all(promises);
+
+      res.json({ produtos: results });
+    } catch (err: any) {
+      console.error("[Super Route Refnets] Erro:", err.message, err.stack);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Debug: see raw Amil API response for network
   app.post("/api/network/raw", async (req, res) => {
     try {
