@@ -333,6 +333,11 @@ export async function deleteMapping(nome: string, cidade: string): Promise<boole
   return (result.rowCount ?? 0) > 0;
 }
 
+export async function clearAllMappings(): Promise<number> {
+  const result = await query(`DELETE FROM mappings`);
+  return result.rowCount ?? 0;
+}
+
 // ─── Last Network Results ───────────────────────────────────────────────────
 
 export async function saveNetworkResults(

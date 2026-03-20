@@ -484,6 +484,8 @@
           <button class="btn" id="btn-auto-match-all" style="background:var(--primary);font-size:13px;padding:10px 20px" disabled>Auto-Match</button>
           <button class="btn" id="btn-confirm-all-auto" style="background:#27ae60;font-size:13px;padding:10px 20px;display:none">Confirmar Todos</button>
           <button class="btn" id="btn-bulk-create" style="background:#8e44ad;font-size:13px;padding:10px 20px" disabled>Criar Todas no Koter</button>
+          <button class="btn" id="btn-rematch" style="background:#e67e22;font-size:13px;padding:10px 20px">Refazer Matchs</button>
+          <button class="btn" id="btn-clear-mappings" style="background:#c0392b;font-size:13px;padding:10px 20px">Limpar Todos Matchs</button>
           <button class="btn" id="btn-export-mapped" style="background:var(--accent);font-size:13px;padding:10px 20px" disabled>Exportar</button>
           <span id="map-stats" style="margin-left:auto;font-size:13px;color:var(--text-light)"></span>
         </div>
@@ -1625,6 +1627,79 @@
         btn.textContent = 'Criar Todas no Koter';
         es.close();
       };
+    });
+
+    // ─── Rematch all providers with city-aware filtering ──────
+    document.getElementById('btn-rematch').addEventListener('click', () => {
+      const estado = document.getElementById('map-estado').value;
+      if (!confirm('Refazer TODOS os matchs com filtro por cidade?\n\nIsso vai corrigir mapeamentos que estavam vinculados à cidade errada.')) return;
+
+      const btn = document.getElementById('btn-rematch');
+      btn.disabled = true;
+      btn.textContent = 'Refazendo...';
+
+      const progWrap = document.getElementById('map-progress-wrap');
+      const progText = document.getElementById('map-progress-text');
+      const progPct = document.getElementById('map-progress-pct');
+      const progFill = document.getElementById('map-progress-fill');
+      progWrap.style.display = 'block';
+      progFill.style.width = '0%';
+
+      const params = new URLSearchParams();
+      if (estado) params.set('estado', estado);
+
+      const es = new EventSource('/api/mappings/rematch?' + params);
+      es.onmessage = (ev) => {
+        const d = JSON.parse(ev.data);
+        if (d.type === 'start') {
+          progText.textContent = `Refazendo matchs 0/${d.total}...`;
+        } else if (d.type === 'progress') {
+          const pct = Math.round((d.done / d.total) * 100);
+          progFill.style.width = pct + '%';
+          progPct.textContent = pct + '%';
+          const icon = d.status === 'matched' ? '✓' : d.status === 'not_found' ? '⊘' : d.status === 'error' ? '✗' : '⚠';
+          progText.textContent = `${icon} ${d.current} — ${d.matched} matchs, ${d.notFound} não encontrados, ${d.failed} erros (${d.done}/${d.total})`;
+        } else if (d.type === 'done') {
+          progText.textContent = `Concluído! ${d.matched} matchs corretos, ${d.notFound} não encontrados, ${d.failed} erros.`;
+          progFill.style.width = '100%';
+          setTimeout(() => { progWrap.style.display = 'none'; }, 8000);
+          btn.disabled = false;
+          btn.textContent = 'Refazer Matchs';
+          loadMapProviders();
+          es.close();
+        } else if (d.type === 'error') {
+          progText.textContent = 'Erro: ' + d.message;
+          btn.disabled = false;
+          btn.textContent = 'Refazer Matchs';
+          es.close();
+        }
+      };
+      es.onerror = () => {
+        progText.textContent = 'Conexão perdida. Tente novamente.';
+        btn.disabled = false;
+        btn.textContent = 'Refazer Matchs';
+        es.close();
+      };
+    });
+
+    // ─── Clear all mappings ─────────────────────────────────
+    document.getElementById('btn-clear-mappings').addEventListener('click', async () => {
+      if (!confirm('Tem certeza que deseja LIMPAR TODOS os mapeamentos?\n\nIsso vai remover todos os vínculos Amil→Koter. Você precisará refazer os matchs ou criar novamente.')) return;
+
+      const btn = document.getElementById('btn-clear-mappings');
+      btn.disabled = true;
+      btn.textContent = 'Limpando...';
+
+      try {
+        const resp = await api.post('/api/mappings/clear-all');
+        alert(`Limpo! ${resp.deleted} mapeamentos removidos.`);
+        loadMapProviders();
+      } catch (err) {
+        alert('Erro ao limpar: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Limpar Todos Matchs';
+      }
     });
 
     // ─── Confirm all auto-matches ────────────────────────────

@@ -32,9 +32,11 @@ import {
   getProviderStates,
   getProviderStats,
   clearAllProviders,
+  clearAllMappings,
   getRefnetIdsByCategoria,
   getRefnetIdsByProviders,
   type AllProvider,
+  type AllProviderWithMapping,
 } from "./mapping-store.js";
 import {
   searchKoterRefnets as searchKoterRefnetsLive,
@@ -225,6 +227,15 @@ async function main() {
     res.json({ deleted: ok });
   });
 
+  app.post("/api/mappings/clear-all", async (_req, res) => {
+    try {
+      const deleted = await clearAllMappings();
+      res.json({ deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/koter-refnets/search", async (req, res) => {
     const { q, estado } = req.query as { q: string; estado?: string };
     if (!q) {
@@ -392,6 +403,123 @@ async function main() {
       }
 
       send({ type: "done", created, failed, skipped, total: allUnmapped.length });
+    } catch (err: any) {
+      send({ type: "error", message: err.message });
+    }
+
+    res.end();
+  });
+
+  // Re-match all existing mappings with city-aware filtering (SSE for progress)
+  app.get("/api/mappings/rematch", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    let aborted = false;
+    req.on("close", () => { aborted = true; });
+
+    const send = (data: any) => {
+      if (!aborted) res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      const estado = req.query.estado as string | undefined;
+
+      // 1. Get ALL providers (mapped + unmapped)
+      let allProviders: AllProviderWithMapping[] = [];
+      let pg = 1;
+      while (true) {
+        const result = await getAllStoredProviders({
+          estado,
+          page: pg,
+          pageSize: 500,
+        });
+        allProviders = allProviders.concat(result.providers);
+        if (allProviders.length >= result.total || result.providers.length === 0) break;
+        pg++;
+      }
+
+      if (!allProviders.length) {
+        send({ type: "done", matched: 0, notFound: 0, failed: 0, total: 0 });
+        res.end();
+        return;
+      }
+
+      send({ type: "start", total: allProviders.length });
+
+      // Cache Koter cities per state
+      const cityCache: Record<string, Array<{ id: string; name: string }>> = {};
+      const normCity = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+
+      let matched = 0, notFound = 0, failed = 0;
+
+      for (let i = 0; i < allProviders.length; i++) {
+        if (aborted) break;
+        const p = allProviders[i];
+
+        try {
+          // Resolve Koter city
+          if (!cityCache[p.estado]) {
+            try {
+              cityCache[p.estado] = await getKoterCitiesByState(p.estado);
+            } catch {
+              cityCache[p.estado] = [];
+            }
+          }
+
+          const cities = cityCache[p.estado];
+          const cityMatch = cities.find((c) => normCity(c.name) === normCity(p.cidade));
+
+          if (!cityMatch) {
+            notFound++;
+            // Delete old wrong mapping if exists
+            await deleteMapping(p.nome, p.cidade);
+            send({ type: "progress", done: i + 1, total: allProviders.length, matched, notFound, failed, current: p.nome, status: "city_not_found" });
+            continue;
+          }
+
+          // Search Koter refnets by name + cityId
+          const { refnets } = await searchKoterRefnetsLive(p.nome, p.estado, 1, 5, cityMatch.id);
+
+          if (refnets.length > 0) {
+            const best = refnets[0];
+            // Verify city matches
+            const cityOk = normCity(p.cidade) === normCity(best.cityName || "");
+            if (cityOk) {
+              await upsertMapping({
+                amilNome: p.nome,
+                amilCidade: p.cidade,
+                amilEstado: p.estado,
+                koterRefnetId: best.id,
+                koterRefnetName: best.name,
+                createdAt: "",
+              });
+              matched++;
+              send({ type: "progress", done: i + 1, total: allProviders.length, matched, notFound, failed, current: p.nome, status: "matched", refnetName: best.name, refnetId: best.id });
+            } else {
+              // City mismatch - delete old mapping
+              await deleteMapping(p.nome, p.cidade);
+              notFound++;
+              send({ type: "progress", done: i + 1, total: allProviders.length, matched, notFound, failed, current: p.nome, status: "city_mismatch" });
+            }
+          } else {
+            // No refnet found for this city - delete old mapping
+            await deleteMapping(p.nome, p.cidade);
+            notFound++;
+            send({ type: "progress", done: i + 1, total: allProviders.length, matched, notFound, failed, current: p.nome, status: "not_found" });
+          }
+
+          // Small delay to not hammer the API
+          await new Promise((r) => setTimeout(r, 100));
+        } catch (err: any) {
+          failed++;
+          send({ type: "progress", done: i + 1, total: allProviders.length, matched, notFound, failed, current: p.nome, status: "error", reason: err.message });
+        }
+      }
+
+      send({ type: "done", matched, notFound, failed, total: allProviders.length });
     } catch (err: any) {
       send({ type: "error", message: err.message });
     }
