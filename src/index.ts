@@ -733,9 +733,43 @@ async function main() {
     }
   });
 
-  // Also support GET for easier testing
-  app.get("/api/super-route/test", (_req, res) => {
-    res.json({ status: "ok", endpoint: "POST /api/super-route" });
+  // Debug: see raw Amil API response for network
+  app.post("/api/network/raw", async (req, res) => {
+    try {
+      const { regiao, estado, linha, tipo_rede } = req.body;
+      if (!regiao || !estado || !linha) {
+        res.status(400).json({ error: "regiao, estado, linha obrigatórios" });
+        return;
+      }
+      const body: Record<string, string> = {
+        regiao, estado, linha,
+        pf: "false",
+        "Tipo de Rede": tipo_rede || "Hospitais",
+      };
+      const url = "https://kitcorretoramil.com.br/wp-admin/admin-ajax.php?action=ktc_get_providers";
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const text = await resp.text();
+      const data = JSON.parse(text);
+      // Return first 3 items of each category + category names
+      const summary: Record<string, any> = {};
+      for (const [cat, items] of Object.entries(data)) {
+        if (Array.isArray(items)) {
+          summary[cat] = {
+            total: items.length,
+            sampleRow: items[0],
+            rowLength: items[0]?.length,
+            sample3: items.slice(0, 3),
+          };
+        }
+      }
+      res.json({ categories: Object.keys(data), summary });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ─── MCP Endpoint (session-aware) ─────────────────────────────────────────
