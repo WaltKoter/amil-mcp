@@ -12,6 +12,7 @@ import {
   getFormOptions,
   ALL_LINHAS,
 } from "./amil-client.js";
+import { fetchPriceTablePdf, fetchNetworkPdf } from "./pdf-scraper.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,46 @@ async function main() {
       const providers = await getProviders({ regiao, estado, linha, tipo_rede });
       res.json(providers);
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── PDF endpoints (Puppeteer scraping from Amil) ────────────────────────
+
+  app.post("/api/pdf/prices", async (req, res) => {
+    try {
+      const { linha, estado } = req.body;
+      if (!linha || !estado) {
+        res.status(400).json({ error: "Parâmetros 'linha' e 'estado' são obrigatórios" });
+        return;
+      }
+      console.log(`[PDF] Gerando PDF de preços: ${linha} - ${estado}...`);
+      const pdfBuffer = await fetchPriceTablePdf({ linha, estado });
+      const filename = `amil-precos-${estado.toLowerCase().replace(/ /g, "-")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error("[PDF] Erro ao gerar PDF de preços:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/pdf/network", async (req, res) => {
+    try {
+      const { linha, regiao, estado, tipo_rede } = req.body;
+      if (!linha || !regiao || !estado) {
+        res.status(400).json({ error: "Parâmetros 'linha', 'regiao' e 'estado' são obrigatórios" });
+        return;
+      }
+      console.log(`[PDF] Gerando PDF de rede: ${linha} - ${estado}...`);
+      const pdfBuffer = await fetchNetworkPdf({ linha, regiao, estado, tipo_rede });
+      const filename = `amil-rede-${estado.toLowerCase().replace(/ /g, "-")}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error("[PDF] Erro ao gerar PDF de rede:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

@@ -422,8 +422,6 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script>
     // ─── Tab switching ─────────────────────────────────────────────────────
     document.querySelectorAll('.tab').forEach(tab => {
@@ -798,7 +796,7 @@
 
         html += `</tbody></table></div>
             <div class="export-bar">
-              <button class="btn-export" style="background:#c0392b" onclick="downloadPricePDF()">&#128196; Baixar PDF</button>
+              <button class="btn-export price-pdf-btn" style="background:#c0392b" onclick="downloadPricePDF()">&#128196; Baixar PDF Amil</button>
               <button class="btn-export" onclick="copyJson(buildPriceExportJson(lastPriceData, lastPriceParams))">&#128203; Copiar JSON Koter</button>
               <button class="btn-export" onclick="downloadJson(buildPriceExportJson(lastPriceData, lastPriceParams), 'amil-precos-'+lastPriceParams.estado.toLowerCase().replace(/ /g,'-')+'.json')">&#11015; Exportar JSON Koter</button>
             </div>
@@ -858,7 +856,7 @@
         }
 
         let html = `<div class="export-bar" style="background:var(--card);border-radius:var(--radius);margin-bottom:16px;justify-content:flex-start">
-          <button class="btn-export" style="background:#c0392b" onclick="downloadNetworkPDF()">&#128196; Baixar PDF</button>
+          <button class="btn-export network-pdf-btn" style="background:#c0392b" onclick="downloadNetworkPDF()">&#128196; Baixar PDF Amil</button>
           <button class="btn-export" onclick="copyJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams))">&#128203; Copiar JSON Koter (Redes)</button>
           <button class="btn-export" onclick="downloadJson(buildNetworkExportJson(lastNetworkData, lastNetworkParams), 'amil-rede-'+lastNetworkParams.estado.toLowerCase().replace(/ /g,'-')+'.json')">&#11015; Exportar JSON Koter (Redes)</button>
         </div>`;
@@ -912,204 +910,77 @@
       });
     }
 
-    // ─── PDF Generation ─────────────────────────────────────────────────────
+    // ─── PDF Download (via Puppeteer scraping from Amil) ───────────────────
 
-    function pdfHeader(doc, title, subtitle, params) {
-      const pw = doc.internal.pageSize.getWidth();
-      // Header bar
-      doc.setFillColor(15, 13, 89);
-      doc.rect(0, 0, pw, 28, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text(title, 14, 12);
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      doc.text(subtitle, 14, 20);
+    async function downloadPricePDF() {
+      if (!lastPriceParams) return;
+      const btn = document.querySelector('.price-pdf-btn');
+      if (btn) { btn.textContent = 'Gerando PDF...'; btn.disabled = true; }
 
-      // Date
-      const today = new Date().toLocaleDateString('pt-BR');
-      doc.setFontSize(8);
-      doc.text('Gerado em: ' + today, pw - 14, 12, { align: 'right' });
-      doc.text('Fonte: Kit Corretor Amil', pw - 14, 18, { align: 'right' });
-
-      // Accent line
-      doc.setFillColor(233, 30, 140);
-      doc.rect(0, 28, pw, 2, 'F');
-
-      // Params info
-      doc.setTextColor(60, 60, 80);
-      doc.setFontSize(9);
-      let y = 38;
-      if (params) {
-        const infoItems = Object.entries(params).filter(([,v]) => v);
-        const infoText = infoItems.map(([k,v]) => {
-          const labels = {
-            linha: 'Linha', estado: 'Estado', numero_vidas: 'Vidas',
-            compulsoriedade: 'Contratacao', coparticipacao: 'Coparticipacao',
-            regiao: 'Regiao', tipo_rede: 'Tipo de Rede'
-          };
-          const copartLabels = {
-            'Com coparticipação30': 'Copart. 30%',
-            'Com coparticipação40': 'Copart. 40%',
-            'Com coparticipação parcial': 'Copart. Parcial TP',
-            'Sem coparticipação': 'Sem Copart.'
-          };
-          const val = copartLabels[v] || v;
-          return (labels[k] || k) + ': ' + val;
-        }).join('   |   ');
-        doc.text(infoText, 14, y);
-        y += 8;
-      }
-      return y;
-    }
-
-    function pdfFooter(doc) {
-      const pageCount = doc.internal.getNumberOfPages();
-      const pw = doc.internal.pageSize.getWidth();
-      const ph = doc.internal.pageSize.getHeight();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFillColor(240, 240, 245);
-        doc.rect(0, ph - 14, pw, 14, 'F');
-        doc.setFontSize(7);
-        doc.setTextColor(120, 120, 140);
-        doc.text('Amil - Tabela gerada automaticamente via Kit Corretor Amil', 14, ph - 5);
-        doc.text('Pagina ' + i + ' de ' + pageCount, pw - 14, ph - 5, { align: 'right' });
-      }
-    }
-
-    function downloadPricePDF() {
-      if (!lastPriceData || !lastPriceParams) return;
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-
-      const tableName = buildTableName(lastPriceParams);
-      const startY = pdfHeader(doc, 'Tabela de Precos - Amil', tableName, lastPriceParams);
-
-      const faixas = ['0-18','19-23','24-28','29-33','34-38','39-43','44-48','49-53','54-58','59+'];
-      const head = [['Plano', 'Acom.', 'Categ.', 'ANS', ...faixas]];
-      const body = lastPriceData.map(p => [
-        p.nome,
-        p.tipo_acomodacao,
-        p.categoria,
-        p.registro_ans,
-        'R$ ' + p.faixa_0_18,
-        'R$ ' + p.faixa_19_23,
-        'R$ ' + p.faixa_24_28,
-        'R$ ' + p.faixa_29_33,
-        'R$ ' + p.faixa_34_38,
-        'R$ ' + p.faixa_39_43,
-        'R$ ' + p.faixa_44_48,
-        'R$ ' + p.faixa_49_53,
-        'R$ ' + p.faixa_54_58,
-        'R$ ' + p.faixa_59_plus,
-      ]);
-
-      doc.autoTable({
-        startY,
-        head,
-        body,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [15, 13, 89],
-          textColor: [255, 255, 255],
-          fontSize: 7,
-          fontStyle: 'bold',
-          halign: 'center',
-          cellPadding: 2,
-        },
-        bodyStyles: {
-          fontSize: 7,
-          cellPadding: 1.8,
-          textColor: [30, 30, 50],
-        },
-        columnStyles: {
-          0: { cellWidth: 42, fontStyle: 'bold' },
-          1: { cellWidth: 12, halign: 'center' },
-          2: { cellWidth: 18, halign: 'center' },
-          3: { cellWidth: 22 },
-          4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' },
-          7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right' },
-          10: { halign: 'right' }, 11: { halign: 'right' }, 12: { halign: 'right' },
-          13: { halign: 'right' },
-        },
-        alternateRowStyles: { fillColor: [248, 248, 252] },
-        margin: { left: 10, right: 10, bottom: 18 },
-        didParseCell: function(data) {
-          // Color category cells
-          if (data.section === 'body' && data.column.index === 2) {
-            const cat = (data.cell.raw || '').toLowerCase();
-            if (cat.includes('bronze')) { data.cell.styles.fillColor = [240,224,200]; data.cell.styles.textColor = [139,105,20]; }
-            else if (cat.includes('prata')) { data.cell.styles.fillColor = [232,232,240]; data.cell.styles.textColor = [85,85,85]; }
-            else if (cat.includes('ouro')) { data.cell.styles.fillColor = [255,243,208]; data.cell.styles.textColor = [154,123,0]; }
-            else if (cat.includes('platinum')) { data.cell.styles.fillColor = [224,232,248]; data.cell.styles.textColor = [42,74,138]; }
-            else if (cat.includes('black') || cat.includes('one')) { data.cell.styles.fillColor = [42,42,42]; data.cell.styles.textColor = [255,255,255]; }
-          }
-        }
-      });
-
-      pdfFooter(doc);
-      const filename = 'amil-precos-' + lastPriceParams.estado.toLowerCase().replace(/ /g, '-') + '.pdf';
-      doc.save(filename);
-    }
-
-    function downloadNetworkPDF() {
-      if (!lastNetworkData || !lastNetworkParams) return;
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-      const subtitle = lastNetworkParams.linha + ' - ' + lastNetworkParams.estado + ' - ' + (lastNetworkParams.tipo_rede || 'Hospitais');
-      let startY = pdfHeader(doc, 'Rede de Prestadores - Amil', subtitle, lastNetworkParams);
-
-      const categories = Object.entries(lastNetworkData).filter(([, items]) => Array.isArray(items) && items.length > 0);
-
-      categories.forEach(([cat, items], idx) => {
-        if (idx > 0) startY = doc.lastAutoTable.finalY + 10;
-
-        // Category title
-        doc.setFillColor(15, 13, 89);
-        doc.roundedRect(10, startY - 2, doc.internal.pageSize.getWidth() - 20, 8, 1, 1, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.text(cat.toUpperCase() + '  (' + items.length + ' prestadores)', 14, startY + 3.5);
-        startY += 10;
-
-        const head = [['Nome', 'Cidade', 'Regiao', 'Modalidades']];
-        const body = items.map(p => [p.nome, p.cidade, p.regiao, p.modalidades]);
-
-        doc.autoTable({
-          startY,
-          head,
-          body,
-          theme: 'grid',
-          headStyles: {
-            fillColor: [60, 60, 90],
-            textColor: [255, 255, 255],
-            fontSize: 8,
-            fontStyle: 'bold',
-            cellPadding: 2,
-          },
-          bodyStyles: {
-            fontSize: 7.5,
-            cellPadding: 1.5,
-            textColor: [30, 30, 50],
-          },
-          columnStyles: {
-            0: { cellWidth: 65, fontStyle: 'bold' },
-            1: { cellWidth: 40 },
-            2: { cellWidth: 30 },
-            3: { cellWidth: 45 },
-          },
-          alternateRowStyles: { fillColor: [248, 248, 252] },
-          margin: { left: 10, right: 10, bottom: 18 },
+      try {
+        const resp = await fetch('/api/pdf/prices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linha: lastPriceParams.linha, estado: lastPriceParams.estado })
         });
-      });
 
-      pdfFooter(doc);
-      const filename = 'amil-rede-' + lastNetworkParams.estado.toLowerCase().replace(/ /g, '-') + '.pdf';
-      doc.save(filename);
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.error || 'Erro ao gerar PDF');
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `amil-precos-${lastPriceParams.estado.toLowerCase().replace(/ /g, '-')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Erro ao gerar PDF: ' + err.message);
+      } finally {
+        if (btn) { btn.textContent = '\u{1F4C4} Baixar PDF Amil'; btn.disabled = false; }
+      }
+    }
+
+    async function downloadNetworkPDF() {
+      if (!lastNetworkParams) return;
+      const btn = document.querySelector('.network-pdf-btn');
+      if (btn) { btn.textContent = 'Gerando PDF...'; btn.disabled = true; }
+
+      try {
+        const resp = await fetch('/api/pdf/network', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            linha: lastNetworkParams.linha,
+            regiao: lastNetworkParams.regiao,
+            estado: lastNetworkParams.estado,
+            tipo_rede: lastNetworkParams.tipo_rede
+          })
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.error || 'Erro ao gerar PDF');
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `amil-rede-${lastNetworkParams.estado.toLowerCase().replace(/ /g, '-')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Erro ao gerar PDF: ' + err.message);
+      } finally {
+        if (btn) { btn.textContent = '\u{1F4C4} Baixar PDF Amil'; btn.disabled = false; }
+      }
     }
 
     // ─── Init ──────────────────────────────────────────────────────────────
