@@ -1,7 +1,10 @@
 FROM node:22-slim
 
-# Install Chromium dependencies for Puppeteer
+# Install Chromium + build tools for Puppeteer and better-sqlite3
 RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
     chromium \
     fonts-liberation \
     libappindicator3-1 \

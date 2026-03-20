@@ -1,10 +1,4 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "..", "data");
-const MAPPINGS_FILE = path.join(DATA_DIR, "mappings.json");
+import { getDb } from "./db.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,118 +19,79 @@ export interface KoterRefnet {
   stateName: string;
 }
 
-interface MappingData {
-  version: number;
-  mappings: RefnetMapping[];
-  koterRefnets: KoterRefnet[];
+export interface NetworkProvider {
+  nome: string;
+  cidade: string;
+  estado: string;
+  categorias: string[];
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function normalizeKey(nome: string, cidade: string): string {
-  return (nome + "|" + cidade).toUpperCase().trim().replace(/\s+/g, " ");
-}
-
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function loadData(): MappingData {
-  ensureDataDir();
-  if (!fs.existsSync(MAPPINGS_FILE)) {
-    return { version: 1, mappings: [], koterRefnets: [] };
-  }
-  try {
-    const raw = fs.readFileSync(MAPPINGS_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return { version: 1, mappings: [], koterRefnets: [] };
-  }
-}
-
-function saveData(data: MappingData): void {
-  ensureDataDir();
-  fs.writeFileSync(MAPPINGS_FILE, JSON.stringify(data, null, 2), "utf-8");
+export interface AutoMatchResult {
+  amilNome: string;
+  amilCidade: string;
+  bestMatch: KoterRefnet | null;
+  confidence: number;
+  alternatives: Array<{ refnet: KoterRefnet; confidence: number }>;
 }
 
 // ─── Mappings CRUD ──────────────────────────────────────────────────────────
 
 export function getAllMappings(estado?: string): RefnetMapping[] {
-  const data = loadData();
+  const db = getDb();
   if (estado) {
-    return data.mappings.filter(
-      (m) => m.amilEstado.toUpperCase() === estado.toUpperCase()
-    );
+    return db
+      .prepare(
+        `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
+                koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
+         FROM mappings WHERE UPPER(amil_estado) = UPPER(?)`
+      )
+      .all(estado) as RefnetMapping[];
   }
-  return data.mappings;
+  return db
+    .prepare(
+      `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
+              koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
+       FROM mappings`
+    )
+    .all() as RefnetMapping[];
 }
 
-export function getMappingByKey(
-  nome: string,
-  cidade: string
-): RefnetMapping | null {
-  const key = normalizeKey(nome, cidade);
-  const data = loadData();
-  return data.mappings.find((m) => normalizeKey(m.amilNome, m.amilCidade) === key) || null;
+export function getMappingByKey(nome: string, cidade: string): RefnetMapping | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT amil_nome as amilNome, amil_cidade as amilCidade, amil_estado as amilEstado,
+              koter_refnet_id as koterRefnetId, koter_refnet_name as koterRefnetName, created_at as createdAt
+       FROM mappings WHERE amil_nome = ? AND amil_cidade = ?`
+    )
+    .get(nome, cidade) as RefnetMapping | undefined;
+  return row || null;
 }
 
 export function upsertMapping(mapping: RefnetMapping): RefnetMapping {
-  const data = loadData();
-  const key = normalizeKey(mapping.amilNome, mapping.amilCidade);
-  const idx = data.mappings.findIndex(
-    (m) => normalizeKey(m.amilNome, m.amilCidade) === key
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO mappings (amil_nome, amil_cidade, amil_estado, koter_refnet_id, koter_refnet_name)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    mapping.amilNome,
+    mapping.amilCidade,
+    mapping.amilEstado,
+    mapping.koterRefnetId,
+    mapping.koterRefnetName
   );
-  if (idx >= 0) {
-    data.mappings[idx] = { ...mapping, createdAt: data.mappings[idx].createdAt };
-  } else {
-    data.mappings.push({ ...mapping, createdAt: new Date().toISOString() });
-  }
-  saveData(data);
   return mapping;
 }
 
 export function deleteMapping(nome: string, cidade: string): boolean {
-  const key = normalizeKey(nome, cidade);
-  const data = loadData();
-  const before = data.mappings.length;
-  data.mappings = data.mappings.filter(
-    (m) => normalizeKey(m.amilNome, m.amilCidade) !== key
-  );
-  if (data.mappings.length < before) {
-    saveData(data);
-    return true;
-  }
-  return false;
+  const db = getDb();
+  const result = db
+    .prepare(`DELETE FROM mappings WHERE amil_nome = ? AND amil_cidade = ?`)
+    .run(nome, cidade);
+  return result.changes > 0;
 }
 
-export function bulkLookupMappings(
-  providers: Array<{ nome: string; cidade: string }>
-): Map<string, RefnetMapping> {
-  const data = loadData();
-  const result = new Map<string, RefnetMapping>();
-  for (const p of providers) {
-    const key = normalizeKey(p.nome, p.cidade);
-    const found = data.mappings.find(
-      (m) => normalizeKey(m.amilNome, m.amilCidade) === key
-    );
-    if (found) result.set(key, found);
-  }
-  return result;
-}
-
-// ─── Koter Refnets Cache ───────────────────────────────────────────────────
-
-export function getKoterRefnets(stateName?: string): KoterRefnet[] {
-  const data = loadData();
-  if (stateName) {
-    return data.koterRefnets.filter(
-      (r) => r.stateName.toUpperCase() === stateName.toUpperCase()
-    );
-  }
-  return data.koterRefnets;
-}
+// ─── Koter Refnets ─────────────────────────────────────────────────────────
 
 export function searchKoterRefnets(
   query: string,
@@ -144,23 +99,53 @@ export function searchKoterRefnets(
   cityName?: string,
   limit = 20
 ): KoterRefnet[] {
-  const data = loadData();
+  const db = getDb();
   const q = query.toUpperCase().trim().replace(/\s+/g, " ");
   if (!q) return [];
 
-  let candidates = data.koterRefnets;
+  let sql = `SELECT id, name, city_id as cityId, city_name as cityName, state_name as stateName FROM koter_refnets WHERE 1=1`;
+  const params: any[] = [];
+
   if (stateName) {
-    candidates = candidates.filter(
-      (r) => r.stateName.toUpperCase() === stateName.toUpperCase()
-    );
+    // Amil: "RIO DE JANEIRO" (upper, no accents), Koter: "Rio de Janeiro"
+    // Resolve by checking distinct states in DB and matching with accent-stripped comparison
+    const allStates = db
+      .prepare(`SELECT DISTINCT state_name FROM koter_refnets`)
+      .all() as Array<{ state_name: string }>;
+    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const inputNorm = norm(stateName);
+    const matchingStates = allStates.filter((s) => norm(s.state_name) === inputNorm).map((s) => s.state_name);
+    if (matchingStates.length > 0) {
+      sql += ` AND state_name IN (${matchingStates.map(() => "?").join(",")})`;
+      params.push(...matchingStates);
+    } else {
+      sql += ` AND UPPER(state_name) LIKE ?`;
+      params.push(`%${inputNorm}%`);
+    }
   }
   if (cityName) {
-    candidates = candidates.filter(
-      (r) => r.cityName.toUpperCase() === cityName.toUpperCase()
-    );
+    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const inputNorm = norm(cityName);
+    const allCities = db
+      .prepare(`SELECT DISTINCT city_name FROM koter_refnets`)
+      .all() as Array<{ city_name: string }>;
+    const matchingCities = allCities.filter((c) => norm(c.city_name) === inputNorm).map((c) => c.city_name);
+    if (matchingCities.length > 0) {
+      sql += ` AND city_name IN (${matchingCities.map(() => "?").join(",")})`;
+      params.push(...matchingCities);
+    }
   }
 
-  // Score each candidate
+  // Pre-filter with LIKE for performance
+  const tokens = q.split(/\s+/).filter((t) => t.length >= 2);
+  if (tokens.length > 0) {
+    sql += ` AND (` + tokens.map(() => `UPPER(name) LIKE ?`).join(" OR ") + `)`;
+    for (const t of tokens) params.push(`%${t}%`);
+  }
+
+  const candidates = db.prepare(sql).all(...params) as KoterRefnet[];
+
+  // Score in JS for better ranking
   const scored = candidates.map((r) => {
     const name = r.name.toUpperCase();
     let score = 0;
@@ -168,7 +153,6 @@ export function searchKoterRefnets(
     else if (name.includes(q)) score = 80;
     else if (q.includes(name)) score = 70;
     else {
-      // Token-based matching
       const qTokens = q.split(/\s+/);
       const nTokens = name.split(/\s+/);
       const matches = qTokens.filter((t) =>
@@ -187,34 +171,86 @@ export function searchKoterRefnets(
 }
 
 export function importKoterRefnets(refnets: KoterRefnet[]): number {
-  const data = loadData();
-  const existingIds = new Set(data.koterRefnets.map((r) => r.id));
-  let added = 0;
-  for (const r of refnets) {
-    if (!existingIds.has(r.id)) {
-      data.koterRefnets.push(r);
-      existingIds.add(r.id);
-      added++;
-    } else {
-      // Update existing
-      const idx = data.koterRefnets.findIndex((x) => x.id === r.id);
-      if (idx >= 0) data.koterRefnets[idx] = r;
+  const db = getDb();
+  const upsert = db.prepare(
+    `INSERT INTO koter_refnets (id, name, city_id, city_name, state_name, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET name=excluded.name, city_id=excluded.city_id,
+       city_name=excluded.city_name, state_name=excluded.state_name, updated_at=datetime('now')`
+  );
+  const countBefore = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
+  const tx = db.transaction(() => {
+    for (const r of refnets) {
+      upsert.run(r.id, r.name, r.cityId, r.cityName, r.stateName);
     }
-  }
-  saveData(data);
-  return added;
+  });
+  tx();
+  const countAfter = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
+  return countAfter - countBefore;
 }
 
-export function getKoterRefnetStats(): {
-  total: number;
-  byState: Record<string, number>;
-} {
-  const data = loadData();
+export function getKoterRefnetStats(): { total: number; byState: Record<string, number> } {
+  const db = getDb();
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM koter_refnets`).get() as any).c;
+  const rows = db
+    .prepare(`SELECT state_name as state, COUNT(*) as cnt FROM koter_refnets GROUP BY state_name ORDER BY cnt DESC`)
+    .all() as Array<{ state: string; cnt: number }>;
   const byState: Record<string, number> = {};
-  for (const r of data.koterRefnets) {
-    byState[r.stateName] = (byState[r.stateName] || 0) + 1;
-  }
-  return { total: data.koterRefnets.length, byState };
+  for (const r of rows) byState[r.state] = r.cnt;
+  return { total, byState };
+}
+
+// ─── Last Network Results ───────────────────────────────────────────────────
+
+export function saveNetworkResults(
+  providers: NetworkProvider[],
+  searchParams: Record<string, string>
+): void {
+  const db = getDb();
+  const paramsJson = JSON.stringify(searchParams);
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM last_network_results`).run();
+    const stmt = db.prepare(
+      `INSERT INTO last_network_results (nome, cidade, estado, categorias, search_params)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+    for (const p of providers) {
+      stmt.run(p.nome, p.cidade, p.estado, JSON.stringify(p.categorias), paramsJson);
+    }
+  });
+  tx();
+}
+
+export function getLastNetworkResults(): {
+  providers: NetworkProvider[];
+  searchParams: Record<string, string> | null;
+} {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT nome, cidade, estado, categorias, search_params FROM last_network_results ORDER BY id`)
+    .all() as Array<{
+    nome: string;
+    cidade: string;
+    estado: string;
+    categorias: string;
+    search_params: string;
+  }>;
+
+  if (!rows.length) return { providers: [], searchParams: null };
+
+  const providers = rows.map((r) => ({
+    nome: r.nome,
+    cidade: r.cidade,
+    estado: r.estado,
+    categorias: JSON.parse(r.categorias || "[]"),
+  }));
+
+  let searchParams = null;
+  try {
+    searchParams = JSON.parse(rows[0].search_params);
+  } catch {}
+
+  return { providers, searchParams };
 }
 
 // ─── Auto-match ─────────────────────────────────────────────────────────────
@@ -228,9 +264,7 @@ const NOISE_WORDS = [
 
 function normalizeName(name: string): string {
   let n = name.toUpperCase().trim();
-  // Remove accents
   n = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  // Remove noise words
   for (const w of NOISE_WORDS) {
     n = n.replace(new RegExp("\\b" + w.replace(/\./g, "\\.") + "\\b", "g"), "");
   }
@@ -251,37 +285,27 @@ function similarity(a: string, b: string): number {
   return matches.length / Math.max(tokensA.length, tokensB.length);
 }
 
-export interface AutoMatchResult {
-  amilNome: string;
-  amilCidade: string;
-  bestMatch: KoterRefnet | null;
-  confidence: number;
-  alternatives: Array<{ refnet: KoterRefnet; confidence: number }>;
-}
-
 export function autoMatchProviders(
   providers: Array<{ nome: string; cidade: string; estado: string }>,
   threshold = 0.5
 ): AutoMatchResult[] {
-  const data = loadData();
+  const db = getDb();
   const results: AutoMatchResult[] = [];
 
   for (const p of providers) {
-    // Skip already mapped
     const existing = getMappingByKey(p.nome, p.cidade);
     if (existing) continue;
 
-    // Filter Koter refnets by state (fuzzy)
-    const stateRefnets = data.koterRefnets.filter((r) => {
-      const rState = r.stateName.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const pState = (p.estado || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return rState.includes(pState) || pState.includes(rState) || rState === pState;
-    });
+    // Get candidates from DB filtered by state
+    const stateRefnets = db
+      .prepare(
+        `SELECT id, name, city_id as cityId, city_name as cityName, state_name as stateName
+         FROM koter_refnets WHERE UPPER(state_name) LIKE ?`
+      )
+      .all(`%${p.estado.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").substring(0, 10)}%`) as KoterRefnet[];
 
-    // Score all candidates
     const scored = stateRefnets.map((r) => {
       let conf = similarity(p.nome, r.name);
-      // Boost if city matches
       const cityMatch =
         r.cityName.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") ===
         p.cidade.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -304,7 +328,7 @@ export function autoMatchProviders(
   return results;
 }
 
-// ─── Export for Koter import ────────────────────────────────────────────────
+// ─── Export ─────────────────────────────────────────────────────────────────
 
 export function exportForKoter(
   providers: Array<{ nome: string; cidade: string }>

@@ -13,6 +13,7 @@ import {
   ALL_LINHAS,
 } from "./amil-client.js";
 import { fetchPriceTablePdf, fetchNetworkPdf } from "./pdf-scraper.js";
+import { initDb } from "./db.js";
 import {
   getAllMappings,
   upsertMapping,
@@ -22,14 +23,19 @@ import {
   getKoterRefnetStats,
   autoMatchProviders,
   exportForKoter,
+  saveNetworkResults,
+  getLastNetworkResults,
 } from "./mapping-store.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  initDb();
+  console.log("[DB] SQLite initialized");
+
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
 
   // ─── Static files (web UI) ────────────────────────────────────────────────
   app.use(express.static(path.join(__dirname, "..", "public")));
@@ -95,11 +101,35 @@ async function main() {
         res.status(400).json({ error: "Parâmetros 'regiao', 'estado' e 'linha' são obrigatórios" });
         return;
       }
-      const providers = await getProviders({ regiao, estado, linha, tipo_rede });
-      res.json(providers);
+      const data = await getProviders({ regiao, estado, linha, tipo_rede });
+
+      // Persist for mapping tab (deduplicated)
+      const seen = new Set<string>();
+      const flat: Array<{ nome: string; cidade: string; estado: string; categorias: string[] }> = [];
+      for (const [cat, items] of Object.entries(data)) {
+        if (!Array.isArray(items)) continue;
+        for (const item of items as any[]) {
+          const key = item.nome + "|" + item.cidade;
+          if (!seen.has(key)) {
+            seen.add(key);
+            const cats: string[] = [];
+            for (const [c2, i2] of Object.entries(data)) {
+              if (Array.isArray(i2) && (i2 as any[]).some((x: any) => x.nome === item.nome && x.cidade === item.cidade)) cats.push(c2);
+            }
+            flat.push({ nome: item.nome, cidade: item.cidade, estado: item.estado || estado, categorias: cats });
+          }
+        }
+      }
+      saveNetworkResults(flat, { regiao, estado, linha, tipo_rede: tipo_rede || "Hospitais" });
+
+      res.json(data);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/api/network/last-results", (_req, res) => {
+    res.json(getLastNetworkResults());
   });
 
   // ─── PDF endpoints (Puppeteer scraping from Amil) ────────────────────────
