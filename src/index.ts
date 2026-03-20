@@ -273,7 +273,7 @@ async function main() {
       }
 
       // Create refnet in Koter
-      const created = await createKoterRefnet(amilNome, match.id);
+      const created = await createKoterRefnet(amilNome, match.id, match.name);
 
       // Auto-map
       await upsertMapping({
@@ -365,7 +365,7 @@ async function main() {
           }
 
           // Create refnet in Koter
-          const refnet = await createKoterRefnet(p.nome, cityMatch.id);
+          const refnet = await createKoterRefnet(p.nome, cityMatch.id, cityMatch.name);
 
           // Auto-map
           await upsertMapping({

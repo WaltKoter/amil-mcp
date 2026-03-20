@@ -135,17 +135,43 @@ export async function getKoterStates(): Promise<Array<{ id: string; name: string
 export async function createKoterRefnet(
   name: string,
   cityId: string,
+  cityName?: string,
   userId = process.env.KOTER_USER_ID || "d2i4sdzg8nh7vy2egv4rjers"
 ): Promise<{ id: string; name: string }> {
-  const result = await callKoterTool("create_referenced_network", { userId, name, cityId });
-  const text = (result.content as Array<{ type: string; text: string }>)
-    .filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("");
+  // Try with original name first, if duplicate error, retry with " - CityName"
+  const namesToTry = [name];
+  if (cityName) {
+    namesToTry.push(`${name} - ${cityName}`);
+  }
 
-  console.log("[Koter Create] Raw response:", text.substring(0, 500));
+  let lastError = "";
+  for (const tryName of namesToTry) {
+    const result = await callKoterTool("create_referenced_network", { userId, name: tryName, cityId });
+    const text = (result.content as Array<{ type: string; text: string }>)
+      .filter((c) => c.type === "text")
+      .map((c) => c.text)
+      .join("");
 
-  // Try multiple JSON extraction strategies
+    console.log("[Koter Create] Trying name:", tryName, "| Response:", text.substring(0, 300));
+
+    // Check for duplicate error
+    if (text.toLowerCase().includes("duplici") || text.toLowerCase().includes("já existir") || text.toLowerCase().includes("ja existir") || text.includes("approximate_name")) {
+      lastError = text.substring(0, 200);
+      console.log("[Koter Create] Duplicate detected, will retry with city suffix");
+      continue;
+    }
+
+    // Try to parse success response
+    const parsed = parseCreateResponse(text, tryName);
+    if (parsed) return parsed;
+
+    lastError = text.substring(0, 200);
+  }
+
+  throw new Error("Could not create refnet: " + lastError);
+}
+
+function parseCreateResponse(text: string, name: string): { id: string; name: string } | null {
   // 1. Try to find a JSON object with an "id" field
   const allJsonMatches = text.match(/\{[^{}]*"id"[^{}]*\}/g);
   if (allJsonMatches) {
@@ -167,11 +193,11 @@ export async function createKoterRefnet(
     } catch {}
   }
 
-  // 3. Try to extract ID from text patterns like "id: abc123" or "ID: abc123"
+  // 3. Try to extract ID from text patterns
   const idMatch = text.match(/["']?id["']?\s*[:=]\s*["']?([a-zA-Z0-9_-]{10,})["']?/i);
   if (idMatch) {
     return { id: idMatch[1], name };
   }
 
-  throw new Error("Could not parse create_referenced_network response: " + text.substring(0, 200));
+  return null;
 }
