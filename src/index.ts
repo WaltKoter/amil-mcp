@@ -712,6 +712,18 @@ async function main() {
     return null;
   }
 
+  /**
+   * Maps price table estado names to the provider API estado name.
+   * The provider API uses different names for SP regions.
+   */
+  function estadoToProviderEstado(estado: string): string {
+    const upper = estado.toUpperCase();
+    if (upper === "SÃO PAULO" || upper === "SAO PAULO" || upper.includes("INTERIOR SP")) {
+      return "SP E INTERIOR";
+    }
+    return estado;
+  }
+
   app.post("/api/super-route", async (req, res) => {
     try {
       const { linha, estado, numero_vidas, compulsoriedade, coparticipacao } = req.body;
@@ -737,7 +749,7 @@ async function main() {
             return { produtos_regionais: [], produtos_nacionais: [] };
           }
         })(),
-        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
+        getProviders({ regiao, estado: estadoToProviderEstado(estado), linha, tipo_rede: "Hospitais" }),
       ]);
 
       if (!plans || plans.length === 0) {
@@ -901,21 +913,22 @@ async function main() {
     }
   });
 
-  // ─── Rota de redes por produto (lightweight) ─────────────────────────────────
+  // ─── Rota de redes por produto (mesmos params da super-route) ─────────────────
   app.post("/api/super-route/refnets", async (req, res) => {
     try {
-      const { linha, estado } = req.body;
-      if (!linha || !estado) {
-        res.status(400).json({ error: "Campos obrigatórios: linha, estado" });
+      const { linha, estado, numero_vidas, compulsoriedade, coparticipacao } = req.body;
+      if (!linha || !estado || !numero_vidas || !compulsoriedade || !coparticipacao) {
+        res.status(400).json({ error: "Campos obrigatórios: linha, estado, numero_vidas, compulsoriedade, coparticipacao" });
         return;
       }
 
       const regiao = ESTADO_TO_REGIAO[estado] || ESTADO_TO_REGIAO[estado.toUpperCase()] || "Sudeste";
+      const providerEstado = estadoToProviderEstado(estado);
 
-      // 1. Fetch price table (minimal params - only need plan names) + providers
+      // Fetch price table (with exact params) + providers in parallel
       const [plans, providerData] = await Promise.all([
-        getPriceTable({ estado, numero_vidas: "2", compulsoriedade: "MEI", coparticipacao: "Com coparticipação30", linha }),
-        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
+        getPriceTable({ estado, numero_vidas, compulsoriedade, coparticipacao, linha }),
+        getProviders({ regiao, estado: providerEstado, linha, tipo_rede: "Hospitais" }),
       ]);
 
       if (!plans || plans.length === 0) {
@@ -952,7 +965,7 @@ async function main() {
       });
 
       // Resolve refnets per plan
-      const results: Array<{ nome: string; tipo_acomodacao: string; refnet_ids: string[] }> = [];
+      const results: Array<{ nome: string; tipo_acomodacao: string; categoria: string; refnet_ids: string[]; provider_count: number }> = [];
       const promises: Promise<void>[] = [];
 
       for (const plan of uniquePlans) {
@@ -972,7 +985,13 @@ async function main() {
             .map(p => ({ nome: p.nome, cidade: p.cidade }));
         }
 
-        const entry = { nome: plan.nome, tipo_acomodacao: plan.tipo_acomodacao, refnet_ids: [] as string[] };
+        const entry = {
+          nome: plan.nome,
+          tipo_acomodacao: plan.tipo_acomodacao,
+          categoria: plan.categoria,
+          refnet_ids: [] as string[],
+          provider_count: filteredProviders.length,
+        };
         results.push(entry);
 
         if (filteredProviders.length > 0) {
@@ -984,7 +1003,10 @@ async function main() {
 
       await Promise.all(promises);
 
-      res.json({ produtos: results });
+      res.json({
+        filtros: { linha, estado, numero_vidas, compulsoriedade, coparticipacao },
+        produtos: results,
+      });
     } catch (err: any) {
       console.error("[Super Route Refnets] Erro:", err.message, err.stack);
       res.status(500).json({ error: err.message });

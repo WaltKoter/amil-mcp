@@ -481,6 +481,14 @@ export function registerTools(server: McpServer) {
     return null;
   }
 
+  function estadoToProviderEstado(estado: string): string {
+    const upper = estado.toUpperCase();
+    if (upper === "SÃO PAULO" || upper === "SAO PAULO" || upper.includes("INTERIOR SP")) {
+      return "SP E INTERIOR";
+    }
+    return estado;
+  }
+
   server.tool(
     "amil_super_route",
     "Gera produto completo para importação no Koter. Combina tabela de preços da Amil, redes referenciadas mapeadas e áreas de comercialização em um único JSON. Retorna planos com preços, abrangência (regional/nacional), cidade_ids e refnet_ids.",
@@ -509,7 +517,7 @@ export function registerTools(server: McpServer) {
             return { produtos_regionais: [] as any[], produtos_nacionais: [] as any[] };
           }
         })(),
-        getProviders({ regiao, estado, linha, tipo_rede: "Hospitais" }),
+        getProviders({ regiao, estado: estadoToProviderEstado(estado), linha, tipo_rede: "Hospitais" }),
       ]);
 
       if (!plans || plans.length === 0) {
